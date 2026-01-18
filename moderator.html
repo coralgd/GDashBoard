@@ -1,40 +1,71 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>Leaderboard</title>
+<title>Moderator Panel</title>
 <link rel="stylesheet" href="hud.css">
 </head>
 <body>
 
 <div class="hud" style="max-width:900px;margin:40px auto;">
-<h1>Лидерборд</h1>
-<div id="list"></div>
+  <h1>Панель модератора</h1>
+  <div id="list"></div>
 </div>
 
 <script type="module">
 import { auth, db } from './firebase.js';
-import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import { collection, query, where, orderBy, getDocs } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+import { onAuthStateChanged } from
+  "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
+import {
+  collection, query, where, orderBy,
+  getDocs, doc, getDoc, updateDoc
+} from
+  "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
-onAuthStateChanged(auth, async u=>{
- if(!u) return location.href='index.html';
+onAuthStateChanged(auth, async user => {
+  if (!user) return location.href = 'index.html';
 
- const q=query(collection(db,'users'),where('situation','==','verified'),orderBy('points','desc'));
- const snap=await getDocs(q);
- let r=0,p=0,last=null;
- snap.forEach(d=>{
-   const u2=d.data(); r++;
-   if(u2.points!==last){p=r;last=u2.points;}
-   const row=document.createElement('div');
-   row.className='row';
-   if(d.id===u.uid) row.classList.add('me');
-   if(u2.role==='moderator') row.classList.add('moderator');
-   if(u2.role==='elder') row.classList.add('elder');
-   row.innerHTML=`<div>${p}</div><div>${u2.nick}</div><div>${u2.points}</div>`;
-   list.appendChild(row);
- });
+  const meSnap = await getDoc(doc(db, 'users', user.uid));
+  const me = meSnap.data();
+
+  if (me.situation !== 'verified')
+    return location.href = 'nick.html';
+
+  if (me.role !== 'moderator' && me.role !== 'elder')
+    return location.href = 'main.html';
+
+  const q = query(
+    collection(db, 'users'),
+    where('situation', '==', 'verified'),
+    orderBy('points', 'desc')
+  );
+
+  const snap = await getDocs(q);
+
+  snap.forEach(d => {
+    const u = d.data();
+
+    if (u.role === 'moderator' || u.role === 'elder') return;
+
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.style.gridTemplateColumns = '1fr 120px 140px';
+
+    row.innerHTML = `
+      <div>${u.nick}</div>
+      <input type="number" value="${u.points}" id="p_${d.id}">
+      <button>Изменить</button>
+    `;
+
+    row.querySelector('button').onclick = async () => {
+      const val = Number(row.querySelector('input').value);
+      await updateDoc(doc(db, 'users', d.id), { points: val });
+    };
+
+    list.appendChild(row);
+  });
 });
 </script>
+
 </body>
 </html>
