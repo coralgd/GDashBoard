@@ -1,67 +1,24 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-<meta charset="UTF-8">
-<title>Выбор ника</title>
-<link rel="stylesheet" href="hud.css">
-</head>
-<body>
-<div class="hud" style="max-width:400px;margin:80px auto;">
-  <h1>Введите ник</h1>
-  <input id="nick" placeholder="Ваш ник">
-  <button id="save">Продолжить</button>
-  <p id="error" style="color:red;margin-top:10px;"></p>
-</div>
-
-<script type="module">
-import { auth, db } from './firebase.js';
-import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import { doc, setDoc, getDoc, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
-
-const input = document.getElementById('nick');
-const btn = document.getElementById('save');
-const error = document.getElementById('error');
-
-onAuthStateChanged(auth, async user => {
-  if(!user) location.href='index.html';
-  const userRef = doc(db, 'users', user.uid);
-  const userSnap = await getDoc(userRef);
-  const userData = userSnap.data() || {};
-
-  // Только если ник и situation уже verified редиректим
-  if(userData.nick && userData.situation==='verified'){
-    location.href = 'main.html';
+btn.onclick = async () => {
+  const nickValue = input.value.trim();
+  if(nickValue.length < 3){
+    error.textContent = 'Ник слишком короткий';
+    return;
   }
 
-  btn.onclick = async () => {
-    error.textContent = '';
-    const nickValue = input.value.trim();
-    if(nickValue.length < 3){
-      error.textContent = 'Ник слишком короткий (min 3 символа)';
-      return;
-    }
+  // Проверка уникальности ника
+  const q = query(collection(db,'users'), where('nick','==',nickValue));
+  const snap = await getDocs(q);
+  if(!snap.empty){
+    error.textContent = 'Такой ник уже занят';
+    return;
+  }
 
-    // Проверка уникальности ника
-    const q = query(collection(db,'users'), where('nick','==',nickValue));
-    const snap = await getDocs(q);
-    if(!snap.empty){
-      error.textContent = 'Такой ник уже занят';
-      return;
-    }
+  // Создаём документ только с ником и почтой
+  await setDoc(doc(db,'users',user.uid), {
+    nick: nickValue,
+    email: user.email
+  });
 
-    // Сохраняем ник, почту, роль, points и situation
-    await setDoc(userRef,{
-      nick: nickValue,
-      email: user.email,
-      role: 'player',
-      points: 0,
-      situation: 'verified'
-    }, { merge: true });
-
-    // Переход на main.html
-    location.href = 'main.html';
-  };
-});
-</script>
-</body>
-</html>
+  // Перенаправляем на main
+  location.href='main.html';
+};
