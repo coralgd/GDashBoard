@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Main</title>
+<link rel="stylesheet" href="hud.css">
+</head>
+<body>
+
+<div class="hud" style="max-width:600px;margin:60px auto;">
+<h1 id="nick"></h1>
+<p>Баллы: <span id="points"></span></p>
+<p>Место: <span id="place"></span></p>
+<button onclick="location.href='leaderboard.html'">Лидерборд</button>
+<button id="check">Проверить</button>
+<p id="error" style="color:red"></p>
+</div>
+
+<script type="module">
+import { auth, db } from './firebase.js';
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
+import { doc, getDoc, collection, query, where, orderBy, getDocs } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+
+onAuthStateChanged(auth, async u=>{
+ if(!u) return location.href='index.html';
+ const me=(await getDoc(doc(db,'users',u.uid))).data();
+ if(me.situation!=='verified') return location.href='nick.html';
+ nick.textContent=me.nick;
+ points.textContent=me.points;
+
+ const q=query(collection(db,'users'),where('situation','==','verified'),orderBy('points','desc'));
+ const snap=await getDocs(q);
+ let r=0,p=0,last=null;
+ snap.forEach(d=>{
+   r++; if(d.data().points!==last){p=r;last=d.data().points;}
+   if(d.id===u.uid) place.textContent=p;
+ });
+
+ check.onclick=()=>{
+   if(me.role==='moderator') location.href='moderator.html';
+   else if(me.role==='elder') location.href='elder.html';
+   else error.textContent='Ошибка: модерки нет';
+ };
+});
+</script>
+</body>
+</html>

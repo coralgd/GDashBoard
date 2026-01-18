@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Leaderboard</title>
+<link rel="stylesheet" href="hud.css">
+</head>
+<body>
+
+<div class="hud" style="max-width:900px;margin:40px auto;">
+<h1>Лидерборд</h1>
+<div id="list"></div>
+</div>
+
+<script type="module">
+import { auth, db } from './firebase.js';
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
+import { collection, query, where, orderBy, getDocs } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+
+onAuthStateChanged(auth, async u=>{
+ if(!u) return location.href='index.html';
+
+ const q=query(collection(db,'users'),where('situation','==','verified'),orderBy('points','desc'));
+ const snap=await getDocs(q);
+ let r=0,p=0,last=null;
+ snap.forEach(d=>{
+   const u2=d.data(); r++;
+   if(u2.points!==last){p=r;last=u2.points;}
+   const row=document.createElement('div');
+   row.className='row';
+   if(d.id===u.uid) row.classList.add('me');
+   if(u2.role==='moderator') row.classList.add('moderator');
+   if(u2.role==='elder') row.classList.add('elder');
+   row.innerHTML=`<div>${p}</div><div>${u2.nick}</div><div>${u2.points}</div>`;
+   list.appendChild(row);
+ });
+});
+</script>
+</body>
+</html>

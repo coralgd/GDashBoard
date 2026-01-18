@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Nick</title>
+<link rel="stylesheet" href="hud.css">
+</head>
+<body>
+
+<div class="hud" style="max-width:400px;margin:80px auto;">
+<h1>Ник</h1>
+<input id="nick" placeholder="Введите ник">
+<br><br>
+<button id="send">Отправить</button>
+</div>
+
+<script type="module">
+import { auth, db } from './firebase.js';
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
+import { doc, updateDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+
+onAuthStateChanged(auth,u=>{
+  if(!u) return location.href='index.html';
+  send.onclick=()=>updateDoc(doc(db,'users',u.uid),{
+    nick:nick.value,
+    situation:'requested'
+  });
+});
+</script>
+</body>
+</html>

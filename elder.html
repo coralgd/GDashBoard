@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Elder Moderator Panel</title>
+<link rel="stylesheet" href="hud.css">
+</head>
+<body>
+
+<div class="hud" style="max-width:1100px;margin:40px auto;">
+  <h1>Панель старшего модератора</h1>
+  <div id="list"></div>
+</div>
+
+<script type="module">
+import { auth, db } from './firebase.js';
+import { onAuthStateChanged } from
+  "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
+import {
+  collection, query, orderBy,
+  getDocs, doc, getDoc, updateDoc
+} from
+  "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+
+onAuthStateChanged(auth, async user => {
+  if (!user) return location.href = 'index.html';
+
+  const meSnap = await getDoc(doc(db, 'users', user.uid));
+  const me = meSnap.data();
+
+  if (me.role !== 'elder')
+    return location.href = 'main.html';
+
+  const q = query(
+    collection(db, 'users'),
+    orderBy('points', 'desc')
+  );
+
+  const snap = await getDocs(q);
+
+  snap.forEach(d => {
+    const u = d.data();
+
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.style.gridTemplateColumns = '1fr 100px 140px 160px 180px';
+
+    const roleBtn =
+      u.role === 'moderator' ? 'Снять модерку' : 'Назначить модером';
+
+    const verBtn =
+      u.situation === 'verified' ? 'Снять верификацию' : 'Верифицировать';
+
+    row.innerHTML = `
+      <div>
+        ${u.nick || '(без ника)'}
+        ${u.role === 'moderator' ? ' [Модер]' : ''}
+        ${u.role === 'elder' ? ' [Старший]' : ''}
+      </div>
+
+      <input type="number" value="${u.points}">
+      <button>Баллы</button>
+      <button>${roleBtn}</button>
+      <button>${verBtn}</button>
+    `;
+
+    const inputs = row.querySelectorAll('input, button');
+
+    inputs[1].onclick = async () => {
+      await updateDoc(doc(db, 'users', d.id), {
+        points: Number(inputs[0].value)
+      });
+    };
+
+    inputs[2].onclick = async () => {
+      const newRole =
+        u.role === 'moderator' ? 'player' : 'moderator';
+      await updateDoc(doc(db, 'users', d.id), { role: newRole });
+      location.reload();
+    };
+
+    inputs[3].onclick = async () => {
+      const newSit =
+        u.situation === 'verified' ? 'not requested' : 'verified';
+      await updateDoc(doc(db, 'users', d.id), { situation: newSit });
+      location.reload();
+    };
+
+    list.appendChild(row);
+  });
+});
+</script>
+
+</body>
+</html>
