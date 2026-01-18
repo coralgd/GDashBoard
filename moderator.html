@@ -6,7 +6,6 @@
 <link rel="stylesheet" href="hud.css">
 </head>
 <body>
-
 <div class="hud" style="max-width:900px;margin:40px auto;">
   <h1>Панель модератора</h1>
   <div id="list"></div>
@@ -14,58 +13,52 @@
 
 <script type="module">
 import { auth, db } from './firebase.js';
-import { onAuthStateChanged } from
-  "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import {
-  collection, query, where, orderBy,
-  getDocs, doc, getDoc, updateDoc
-} from
-  "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
+import { collection, query, where, orderBy, getDocs, doc, updateDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
 onAuthStateChanged(auth, async user => {
-  if (!user) return location.href = 'index.html';
+  if(!user) return location.href='index.html';
 
-  const meSnap = await getDoc(doc(db, 'users', user.uid));
+  const meSnap = await getDoc(doc(db,'users',user.uid));
   const me = meSnap.data();
+  if(me.role!=='moderator' && me.role!=='elder') return location.href='main.html';
+  if(me.situation!=='verified') return location.href='nick.html';
 
-  if (me.situation !== 'verified')
-    return location.href = 'nick.html';
-
-  if (me.role !== 'moderator' && me.role !== 'elder')
-    return location.href = 'main.html';
-
-  const q = query(
-    collection(db, 'users'),
-    where('situation', '==', 'verified'),
-    orderBy('points', 'desc')
-  );
-
+  const q = query(collection(db,'users'), where('situation','==','verified'), orderBy('points','desc'));
   const snap = await getDocs(q);
 
   snap.forEach(d => {
     const u = d.data();
-
-    if (u.role === 'moderator' || u.role === 'elder') return;
+    if(u.role==='moderator' || u.role==='elder') return;
 
     const row = document.createElement('div');
-    row.className = 'row';
-    row.style.gridTemplateColumns = '1fr 120px 140px';
+    row.className='row';
+    row.style.display='grid';
+    row.style.gridTemplateColumns='2fr 1fr 1fr 1fr';
+    row.style.alignItems='center';
+    row.style.marginBottom='8px';
 
-    row.innerHTML = `
-      <div>${u.nick}</div>
-      <input type="number" value="${u.points}" id="p_${d.id}">
-      <button>Изменить</button>
-    `;
+    const nickDiv = document.createElement('div');
+    nickDiv.textContent = u.nick;
 
-    row.querySelector('button').onclick = async () => {
-      const val = Number(row.querySelector('input').value);
-      await updateDoc(doc(db, 'users', d.id), { points: val });
+    const input = document.createElement('input');
+    input.type='number';
+    input.value = u.points;
+    input.style.width='80px';
+
+    const pointsBtn = document.createElement('button');
+    pointsBtn.textContent='Баллы';
+    pointsBtn.onclick = async ()=>{
+      await updateDoc(doc(db,'users',d.id),{ points:Number(input.value) });
     };
 
-    list.appendChild(row);
+    row.appendChild(nickDiv);
+    row.appendChild(input);
+    row.appendChild(pointsBtn);
+
+    document.getElementById('list').appendChild(row);
   });
 });
 </script>
-
 </body>
 </html>
