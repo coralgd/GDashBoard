@@ -1,31 +1,73 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>Nick</title>
+<title>Выбор ника</title>
 <link rel="stylesheet" href="hud.css">
 </head>
 <body>
 
 <div class="hud" style="max-width:400px;margin:80px auto;">
-<h1>Ник</h1>
-<input id="nick" placeholder="Введите ник">
-<br><br>
-<button id="send">Отправить</button>
+  <h1>Введите ник</h1>
+
+  <input id="nick" placeholder="Ваш ник">
+  <button id="save">Продолжить</button>
+  <p id="error" style="color:red;margin-top:10px;"></p>
 </div>
 
 <script type="module">
 import { auth, db } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import { doc, updateDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+import { doc, setDoc, getDoc, collection, query, where, getDocs } 
+from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
-onAuthStateChanged(auth,u=>{
-  if(!u) return location.href='index.html';
-  send.onclick=()=>updateDoc(doc(db,'users',u.uid),{
-    nick:nick.value,
-    situation:'requested'
-  });
+const input = document.getElementById('nick');
+const btn = document.getElementById('save');
+const error = document.getElementById('error');
+
+onAuthStateChanged(auth, async user => {
+  if(!user) location.href='index.html';
+
+  const userRef = doc(db, 'users', user.uid);
+  const userSnap = await getDoc(userRef);
+
+  // Если ник уже есть, запрещаем менять
+  if(userSnap.exists() && userSnap.data().nick){
+    location.href = 'main.html';
+    return;
+  }
+
+  btn.onclick = async () => {
+    error.textContent = '';
+    const nickValue = input.value.trim();
+
+    if(nickValue.length < 3){
+      error.textContent = 'Ник слишком короткий (min 3 символа)';
+      return;
+    }
+
+    // Проверка уникальности ника
+    const q = query(collection(db,'users'), where('nick','==',nickValue));
+    const snap = await getDocs(q);
+    if(!snap.empty){
+      error.textContent = 'Такой ник уже занят';
+      return;
+    }
+
+    // Запись ника, почты, роли и situation
+    await setDoc(userRef,{
+      nick: nickValue,
+      email: user.email,
+      role: 'player',
+      points: 0,
+      situation: 'verified'
+    }, { merge: true });
+
+    // Моментальный переход без reload
+    window.location.href = 'main.html';
+  };
 });
 </script>
+
 </body>
 </html>
