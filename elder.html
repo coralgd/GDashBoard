@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>Elder Moderator Panel</title>
+<title>Старший модератор</title>
 <link rel="stylesheet" href="hud.css">
 </head>
 <body>
@@ -14,28 +14,18 @@
 
 <script type="module">
 import { auth, db } from './firebase.js';
-import { onAuthStateChanged } from
-  "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import {
-  collection, query, orderBy,
-  getDocs, doc, getDoc, updateDoc
-} from
-  "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
+import { collection, query, orderBy, getDocs, doc, updateDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
 onAuthStateChanged(auth, async user => {
-  if (!user) return location.href = 'index.html';
-
-  const meSnap = await getDoc(doc(db, 'users', user.uid));
+  if(!user) return location.href='index.html';
+  
+  const meSnap = await getDoc(doc(db,'users',user.uid));
   const me = meSnap.data();
 
-  if (me.role !== 'elder')
-    return location.href = 'main.html';
+  if(me.role!=='elder') return location.href='main.html';
 
-  const q = query(
-    collection(db, 'users'),
-    orderBy('points', 'desc')
-  );
-
+  const q = query(collection(db,'users'), orderBy('points','desc'));
   const snap = await getDocs(q);
 
   snap.forEach(d => {
@@ -43,50 +33,55 @@ onAuthStateChanged(auth, async user => {
 
     const row = document.createElement('div');
     row.className = 'row';
-    row.style.gridTemplateColumns = '1fr 100px 140px 160px 180px';
+    row.style.gridTemplateColumns = '1fr 100px 140px 160px 160px';
 
-    const roleBtn =
-      u.role === 'moderator' ? 'Снять модерку' : 'Назначить модером';
+    // Кнопка смены роли
+    const roleBtn = document.createElement('button');
+    const verBtn = document.createElement('button');
 
-    const verBtn =
-      u.situation === 'verified' ? 'Снять верификацию' : 'Верифицировать';
-
-    row.innerHTML = `
-      <div>
-        ${u.nick || '(без ника)'}
-        ${u.role === 'moderator' ? ' [Модер]' : ''}
-        ${u.role === 'elder' ? ' [Старший]' : ''}
-      </div>
-
-      <input type="number" value="${u.points}">
-      <button>Баллы</button>
-      <button>${roleBtn}</button>
-      <button>${verBtn}</button>
-    `;
-
-    const inputs = row.querySelectorAll('input, button');
-
-    inputs[1].onclick = async () => {
-      await updateDoc(doc(db, 'users', d.id), {
-        points: Number(inputs[0].value)
-      });
+    const setRoleBtn = () => {
+      roleBtn.textContent = u.role==='moderator' ? 'Снять модерку' : 'Назначить модером';
+      roleBtn.style.boxShadow = u.role==='moderator' ? '0 0 15px #ff4d4d' : '0 0 15px #00aaff';
+      roleBtn.style.background = u.role==='moderator' ? '#ff4d4d33' : '#00aaff33';
+    };
+    const setVerBtn = () => {
+      verBtn.textContent = u.situation==='verified' ? 'Снять верификацию' : 'Верифицировать';
+      verBtn.style.boxShadow = u.situation==='verified' ? '0 0 15px #ff4d4d' : '0 0 15px #00aaff';
+      verBtn.style.background = u.situation==='verified' ? '#ff4d4d33' : '#00aaff33';
     };
 
-    inputs[2].onclick = async () => {
-      const newRole =
-        u.role === 'moderator' ? 'player' : 'moderator';
-      await updateDoc(doc(db, 'users', d.id), { role: newRole });
-      location.reload();
+    setRoleBtn();
+    setVerBtn();
+
+    roleBtn.onclick = async () => {
+      const newRole = u.role==='moderator' ? 'player' : 'moderator';
+      await updateDoc(doc(db,'users',d.id),{ role:newRole });
+      u.role=newRole; // локально
+      setRoleBtn();
     };
 
-    inputs[3].onclick = async () => {
-      const newSit =
-        u.situation === 'verified' ? 'not requested' : 'verified';
-      await updateDoc(doc(db, 'users', d.id), { situation: newSit });
-      location.reload();
+    verBtn.onclick = async () => {
+      const newSit = u.situation==='verified' ? 'not requested' : 'verified';
+      await updateDoc(doc(db,'users',d.id),{ situation:newSit });
+      u.situation=newSit;
+      setVerBtn();
     };
 
-    list.appendChild(row);
+    row.innerHTML = `<div>${u.nick||'(без ника)'} ${u.role==='elder'?'[Старший]':''}</div>
+                     <input type="number" value="${u.points}">
+                     <button>Баллы</button>`;
+    
+    const input = row.querySelector('input');
+    const pointsBtn = row.querySelector('button');
+
+    pointsBtn.onclick = async () => {
+      await updateDoc(doc(db,'users',d.id),{ points:Number(input.value) });
+    };
+
+    row.appendChild(roleBtn);
+    row.appendChild(verBtn);
+
+    document.getElementById('list').appendChild(row);
   });
 });
 </script>
