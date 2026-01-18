@@ -18,7 +18,6 @@ import { collection, query, where, orderBy, getDocs, doc, updateDoc, getDoc } fr
 
 onAuthStateChanged(auth, async user => {
   if(!user) return location.href='index.html';
-
   const meSnap = await getDoc(doc(db,'users',user.uid));
   const me = meSnap.data();
   if(me.role!=='moderator' && me.role!=='elder') return location.href='main.html';
@@ -34,7 +33,7 @@ onAuthStateChanged(auth, async user => {
     const row = document.createElement('div');
     row.className='row';
     row.style.display='grid';
-    row.style.gridTemplateColumns='2fr 1fr 1fr 1fr';
+    row.style.gridTemplateColumns='2fr 1fr 1fr';
     row.style.alignItems='center';
     row.style.marginBottom='8px';
 
@@ -55,7 +54,6 @@ onAuthStateChanged(auth, async user => {
     row.appendChild(nickDiv);
     row.appendChild(input);
     row.appendChild(pointsBtn);
-
     document.getElementById('list').appendChild(row);
   });
 });
