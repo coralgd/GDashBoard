@@ -6,55 +6,83 @@
 <link rel="stylesheet" href="hud.css">
 </head>
 <body>
+
 <div class="hud" style="max-width:500px;margin:80px auto;text-align:center;">
   <h1>Выберите ник</h1>
-  <input id="nickInput" type="text" placeholder="Введите ник" style="padding:6px 10px;font-size:16px;width:80%;">
-  <button id="submitBtn" style="margin-top:20px;">Отправить</button>
-  <p id="error" style="color:red;margin-top:10px;"></p>
+  <input id="nickInput" type="text" placeholder="Введите ник">
+  <button id="submitBtn">Отправить</button>
+  <p id="error" style="color:red"></p>
 </div>
 
 <script type="module">
 import { auth, db } from './firebase.js';
-import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import { doc, setDoc, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+import { onAuthStateChanged } from
+  "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
+import {
+  doc, getDoc, setDoc,
+  collection, query, where, getDocs
+} from
+  "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
 const input = document.getElementById('nickInput');
 const btn = document.getElementById('submitBtn');
 const error = document.getElementById('error');
 
-onAuthStateChanged(auth, user => {
-  if(!user) return location.href='index.html';
-  
-  btn.onclick = async () => {
-    const nickValue = input.value.trim();
-    if(nickValue.length < 3){
-      error.textContent = 'Ник слишком короткий';
+onAuthStateChanged(auth, async (user) => {
+  if (!user) {
+    location.href = 'index.html';
+    return;
+  }
+
+  // 🔥 ВОТ ОН — ГЛАВНЫЙ ФИКС
+  const userRef = doc(db, 'users', user.uid);
+  const snap = await getDoc(userRef);
+
+  if (snap.exists()) {
+    const data = snap.data();
+
+    // ЕСЛИ УЖЕ ВЕРИФНУТ — СРАЗУ НА ГЛАВНУЮ
+    if (data.situation === 'verified' && data.nick) {
+      location.href = 'main.html';
       return;
     }
+  }
 
-    // Проверка уникальности ника
-    const q = query(collection(db,'users'), where('nick','==',nickValue));
-    const snap = await getDocs(q);
-    if(!snap.empty){
-      error.textContent = 'Такой ник уже занят';
-      return;
-    }
-
-    try {
-      // Создаём документ только с ником и почтой
-      await setDoc(doc(db,'users',user.uid), {
-        nick: nickValue,
-        email: user.email
-      });
-
-      // Перенаправление на main
-      location.href='main.html';
-    } catch(e){
-      console.error(e);
-      error.textContent = 'Ошибка при отправке ника';
-    }
-  };
+  // ИНАЧЕ остаёмся на странице ника
 });
+
+// Отправка ника
+btn.onclick = async () => {
+  const nickValue = input.value.trim();
+
+  if (nickValue.length < 3) {
+    error.textContent = 'Ник слишком короткий';
+    return;
+  }
+
+  // Проверка уникальности
+  const q = query(collection(db,'users'), where('nick','==',nickValue));
+  const snap = await getDocs(q);
+  if (!snap.empty) {
+    error.textContent = 'Ник уже занят';
+    return;
+  }
+
+  try {
+    await setDoc(doc(db,'users',auth.currentUser.uid), {
+      nick: nickValue,
+      email: auth.currentUser.email,
+      situation: 'not requested'
+    }, { merge: true });
+
+    error.style.color = 'cyan';
+    error.textContent = 'Ник отправлен. Ожидайте проверки.';
+  } catch (e) {
+    console.error(e);
+    error.textContent = 'Ошибка отправки ника';
+  }
+};
 </script>
+
 </body>
 </html>
