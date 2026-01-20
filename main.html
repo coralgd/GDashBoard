@@ -2,75 +2,46 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>Main</title>
+<title>Главная</title>
 <link rel="stylesheet" href="hud.css">
 </head>
 <body>
-<div class="hud" style="max-width:600px;margin:60px auto;text-align:center;">
-  <h1>Главная страница</h1>
-  <p id="userInfo"></p>
-  <p id="userPoints"></p>
-  <p id="userPlace"></p>
 
-  <button id="leaderboardBtn" style="margin-top:20px;">Лидерборд</button>
-  <button id="check" style="margin-top:20px;">Проверить</button>
-  <p id="err" style="color:red;margin-top:10px;"></p>
+<div class="hud top">
+  <button id="logoutBtn">Выйти</button>
+</div>
+
+<div class="hud center">
+  <h2 id="nick"></h2>
+  <p>Баллы: <span id="points"></span></p>
+  <button onclick="location.href='leaderboard.html'">Лидерборд</button>
 </div>
 
 <script type="module">
 import { auth, db } from './firebase.js';
-import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import { doc, getDoc, collection, getDocs, query, orderBy } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+import { onAuthStateChanged, signOut } from
+  "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
+import { doc, getDoc } from
+  "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
-const info = document.getElementById('userInfo');
-const pointsEl = document.getElementById('userPoints');
-const placeEl = document.getElementById('userPlace');
-const err = document.getElementById('err');
-const btn = document.getElementById('check');
-const leaderboardBtn = document.getElementById('leaderboardBtn');
+onAuthStateChanged(auth, async (user) => {
+  if (!user) return location.href='index.html';
 
-onAuthStateChanged(auth, async user => {
-  if(!user) return location.href='index.html';
+  const snap = await getDoc(doc(db,'users',user.uid));
+  if (!snap.exists() || snap.data().situation !== 'verified') {
+    location.href='nick.html';
+    return;
+  }
 
-  const userRef = doc(db,'users',user.uid);
-  const userSnap = await getDoc(userRef);
-  const u = userSnap.data();
-
-  if(!u || u.situation !== 'verified') return location.href='nick.html';
-
-  info.textContent = `Ник: ${u.nick}`;
-  pointsEl.textContent = `Баллы: ${u.points}`;
-
-  // Вычисляем место пользователя
-  const q = query(collection(db,'users'), orderBy('points','desc'));
-  const snap = await getDocs(q);
-
-  let place = 0;
-  let lastPoints = null;
-  let rank = 0;
-
-  snap.forEach(docSnap => {
-    const data = docSnap.data();
-    rank++;
-    if(data.points !== lastPoints){
-      place = rank;
-      lastPoints = data.points;
-    }
-    if(docSnap.id === user.uid){
-      placeEl.textContent = `Место: ${place}`;
-    }
-  });
-
-  // Кнопка перехода на лидерборд
-  leaderboardBtn.onclick = () => location.href='leaderboard.html';
-
-  // Кнопка "Проверить" для модеров
-  btn.onclick = () => {
-    if(u.role==='moderator') location.href='moderator.html';
-    else if(u.role==='elder') location.href='elder.html';
-    else err.textContent = 'Ошибка: модерки нет';
-  };
+  nick.textContent = snap.data().nick;
+  points.textContent = snap.data().points ?? 0;
 });
+
+logoutBtn.onclick = async () => {
+  await signOut(auth);
+  location.href='index.html';
+};
 </script>
+
 </body>
 </html>
