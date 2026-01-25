@@ -13,6 +13,7 @@
   <p id="userPlace"></p>
 
   <button id="leaderboardBtn" style="margin-top:20px;">Лидерборд</button>
+  <button id="sendBtn" style="margin-top:20px;">Отправка прохождений</button>
   <button id="check" style="margin-top:20px;">Проверить</button>
   <p id="err" style="color:red;margin-top:10px;"></p>
 </div>
@@ -28,6 +29,7 @@ const placeEl = document.getElementById('userPlace');
 const err = document.getElementById('err');
 const btn = document.getElementById('check');
 const leaderboardBtn = document.getElementById('leaderboardBtn');
+const sendBtn = document.getElementById('sendBtn');
 
 onAuthStateChanged(auth, async user => {
   if(!user) return location.href='index.html';
@@ -63,6 +65,9 @@ onAuthStateChanged(auth, async user => {
 
   // Кнопка перехода на лидерборд
   leaderboardBtn.onclick = () => location.href='leaderboard.html';
+
+  // Кнопка перехода на отправку
+  sendBtn.onclick = () => location.href='send.html';
 
   // Кнопка "Проверить" для модеров
   btn.onclick = () => {
