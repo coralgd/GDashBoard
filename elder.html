@@ -2,35 +2,140 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>Старший модератор</title>
-<link rel="stylesheet" href="hud.css">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GDashBoard — Старший модератор</title>
+<style>
+body { margin:0; font-family:'Orbitron',sans-serif; background:linear-gradient(135deg,#0a0a1f,#001f3f); color:#00f3ff; }
+header { background:#001f3f; padding:1rem; text-align:center; font-size:1.5rem; box-shadow:0 0 10px #00f3ff44; }
+nav ul { display:flex; justify-content:center; list-style:none; padding:0.5rem; background:#001f3f66; margin:0; }
+nav li { margin:0 1rem; }
+nav a { color:#00f3ff; text-decoration:none; font-weight:bold; padding:0.3rem 0.6rem; border-radius:6px; transition:0.2s; }
+nav a:hover { background:#00f3ff22; }
+.container { max-width:1000px; margin:auto; padding:1rem; }
+h2{text-align:center; margin-bottom:1rem;}
+.tabs { display:flex; justify-content:center; margin-bottom:1rem; }
+.tab { padding:0.5rem 1rem; margin:0 0.3rem; cursor:pointer; border-radius:6px; border:1px solid #00f3ff; background:#001f3f66; transition:0.2s; }
+.tab.active { background:#00f3ff33; }
+.tab:hover { background:#00f3ff22; }
+.table-section { background:rgba(0,31,63,0.7); padding:1rem; border-radius:10px; margin-bottom:2rem; border:1px solid #00f3ff55; display:none; }
+table { width:100%; border-collapse:collapse; }
+th, td { border:1px solid #00f3ff44; padding:0.5rem; text-align:center; }
+th { background:#001f3f66; }
+button { padding:0.3rem 0.6rem; margin:0.2rem; border-radius:6px; border:1px solid #00f3ff; background:#00f3ff33; color:#00f3ff; cursor:pointer; transition:0.2s; }
+button:hover { background:#00f3ff55; }
+.status-pending { color:#ff0; }
+.status-approved { color:#0f0; }
+.status-rejected { color:#f00; }
+.status-warning { color:#f90; }
+</style>
 </head>
 <body>
-
-<button class="hud-home" id="homeBtn">⟵ Главная</button>
-
-<div class="hud center">
-  <h2>Панель старшего модератора</h2>
+<header>GDashBoard — Старший модератор</header>
+<nav>
+<ul>
+<li><a href="main.html">Главная</a></li>
+<li><a href="elder.html">Сложные случаи</a></li>
+<li><a href="#" onclick="logout()">Выход</a></li>
+</ul>
+</nav>
+<div class="container">
+<div class="tabs">
+<div class="tab active" onclick="showTab('regular')">Отправки</div>
+<div class="tab" onclick="showTab('complex')">Сложные случаи</div>
 </div>
 
+<div id="regular" class="table-section" style="display:block;">
+<h2>Новые отправки</h2>
+<table>
+<thead><tr><th>Дата</th><th>Игрок</th><th>Уровень</th><th>Ссылка</th><th>Комментарий</th><th>Статус</th><th>Действие</th></tr></thead>
+<tbody id="regularTable"></tbody>
+</table>
+</div>
+
+<div id="complex" class="table-section">
+<h2>Сложные случаи</h2>
+<table>
+<thead><tr><th>Дата</th><th>Игрок</th><th>Уровень</th><th>Ссылка</th><th>Комментарий</th><th>Статус</th><th>Действие</th></tr></thead>
+<tbody id="complexTable"></tbody>
+</table>
+</div>
+</div>
 <script type="module">
-import { auth, db } from './firebase.js';
-import { onAuthStateChanged } from
-  "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import { doc, getDoc } from
-  "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.6.0/firebase-auth.js";
+import { getFirestore, collection, getDocs, doc, updateDoc } from "https://www.gstatic.com/firebasejs/10.6.0/firebase-firestore.js";
+import { app } from "./firebase.js";
 
-homeBtn.onclick = () => location.href='main.html';
+const auth = getAuth(app);
+const db = getFirestore(app);
 
-onAuthStateChanged(auth, async (user) => {
-  if (!user) return location.href='index.html';
-
-  const snap = await getDoc(doc(db,'users',user.uid));
-  if (!snap.exists() || snap.data().role !== 'elder') {
-    location.href='main.html';
-  }
+onAuthStateChanged(auth, user=>{
+  if(!user||!user.emailVerified){ window.location.href="./index.html"; }
+  else { loadRegular(); loadComplex(); }
 });
-</script>
 
+const regularTable = document.getElementById('regularTable');
+const complexTable = document.getElementById('complexTable');
+
+function showTab(id){
+  document.getElementById('regular').style.display = id==='regular'?'block':'none';
+  document.getElementById('complex').style.display = id==='complex'?'block':'none';
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  event.target.classList.add('active');
+}
+
+async function loadRegular(){
+  regularTable.innerHTML="";
+  const snapshot = await getDocs(collection(db,"submissions"));
+  snapshot.forEach(docSnap=>{
+    const data=docSnap.data();
+    if(data.status==="pending"){
+      const tr=document.createElement('tr');
+      tr.innerHTML=`<td>${data.createdAt?.toDate?.()?.toLocaleString()||""}</td>
+      <td>${data.userId}</td>
+      <td>${data.levelName}</td>
+      <td><a href="${data.videoUrl}" target="_blank">Ссылка</a></td>
+      <td>${data.description||"-"}</td>
+      <td class="status-${data.status.toLowerCase()}">${data.status}</td>
+      <td>
+        <button onclick="setStatus('${docSnap.id}','approved')">Подтвердить</button>
+        <button onclick="setStatus('${docSnap.id}','rejected')">Отказать</button>
+        <button onclick="setStatus('${docSnap.id}','warning')">Предупреждение</button>
+      </td>`;
+      regularTable.appendChild(tr);
+    }
+  });
+}
+
+async function loadComplex(){
+  complexTable.innerHTML="";
+  const snapshot = await getDocs(collection(db,"submissions"));
+  snapshot.forEach(docSnap=>{
+    const data=docSnap.data();
+    if(data.status==="review"){ // статус "на рассмотрении старшего"
+      const tr=document.createElement('tr');
+      tr.innerHTML=`<td>${data.createdAt?.toDate?.()?.toLocaleString()||""}</td>
+      <td>${data.userId}</td>
+      <td>${data.levelName}</td>
+      <td><a href="${data.videoUrl}" target="_blank">Ссылка</a></td>
+      <td>${data.description||"-"}</td>
+      <td class="status-${data.status.toLowerCase()}">${data.status}</td>
+      <td>
+        <button onclick="setStatus('${docSnap.id}','approved')">Подтвердить</button>
+        <button onclick="setStatus('${docSnap.id}','rejected')">Отказать</button>
+        <button onclick="setStatus('${docSnap.id}','warning')">Предупреждение</button>
+      </td>`;
+      complexTable.appendChild(tr);
+    }
+  });
+}
+
+async function setStatus(id,status){
+  const docRef=doc(db,"submissions",id);
+  await updateDoc(docRef,{status:status});
+  loadRegular(); loadComplex();
+}
+
+window.logout=()=>signOut(auth).then(()=>window.location.href="./index.html");
+</script>
 </body>
 </html>
