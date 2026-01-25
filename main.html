@@ -2,48 +2,75 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>GDashBoard — Главная</title>
-<style>
-  body { margin:0; font-family:'Orbitron',sans-serif; background:linear-gradient(135deg,#0a0a1f,#001f3f); color:#00f3ff; }
-  header { background:#001f3f; padding:1rem; text-align:center; font-size:1.8rem; box-shadow:0 0 10px #00f3ff44; }
-  nav ul { display:flex; justify-content:center; list-style:none; padding:0.5rem; background:#001f3f66; margin:0; }
-  nav li { margin:0 1rem; }
-  nav a { color:#00f3ff; text-decoration:none; font-weight:bold; padding:0.3rem 0.6rem; border-radius:6px; transition:0.2s; }
-  nav a:hover { background:#00f3ff22; }
-  .content { max-width:1000px; margin:auto; padding:2rem; text-align:center; }
-  button { padding:0.5rem 1rem; background:#00f3ff33; border:1px solid #00f3ff; color:#00f3ff; cursor:pointer; font-family:'Orbitron',sans-serif; border-radius:6px; transition:0.2s; margin-top:1rem; }
-  button:hover { background:#00f3ff55; }
-</style>
+<title>Main</title>
+<link rel="stylesheet" href="hud.css">
 </head>
 <body>
-<header>GDashBoard — Главная</header>
-<nav>
-  <ul>
-    <li><a href="main.html">Главная</a></li>
-    <li><a href="leaderboard.html">Лидерборд</a></li>
-    <li><a href="send.html">Отправка прохождений</a></li>
-    <li><a href="moderator.html">Модераторская</a></li>
-    <li><a href="elder.html">Старший модератор</a></li>
-    <li><a href="#" onclick="logout()">Выход</a></li>
-  </ul>
-</nav>
-<div class="content">
-  <h2>Добро пожаловать в GDashBoard!</h2>
-  <p>Отслеживайте свой прогресс, отправляйте прохождения и смотрите лидерборд.</p>
-  <button onclick="location.href='send.html'">Перейти к отправке прохождений</button>
+<div class="hud" style="max-width:600px;margin:60px auto;text-align:center;">
+  <h1>Главная страница</h1>
+  <p id="userInfo"></p>
+  <p id="userPoints"></p>
+  <p id="userPlace"></p>
+
+  <button id="leaderboardBtn" style="margin-top:20px;">Лидерборд</button>
+  <button id="check" style="margin-top:20px;">Проверить</button>
+  <p id="err" style="color:red;margin-top:10px;"></p>
 </div>
+
 <script type="module">
-import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.6.0/firebase-auth.js";
-import { app } from "./firebase.js";
+import { auth, db } from './firebase.js';
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
+import { doc, getDoc, collection, getDocs, query, orderBy } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
-const auth = getAuth(app);
+const info = document.getElementById('userInfo');
+const pointsEl = document.getElementById('userPoints');
+const placeEl = document.getElementById('userPlace');
+const err = document.getElementById('err');
+const btn = document.getElementById('check');
+const leaderboardBtn = document.getElementById('leaderboardBtn');
 
-onAuthStateChanged(auth, user => {
-  if (!user || !user.emailVerified) window.location.href="./index.html";
+onAuthStateChanged(auth, async user => {
+  if(!user) return location.href='index.html';
+
+  const userRef = doc(db,'users',user.uid);
+  const userSnap = await getDoc(userRef);
+  const u = userSnap.data();
+
+  if(!u || u.situation !== 'verified') return location.href='nick.html';
+
+  info.textContent = `Ник: ${u.nick}`;
+  pointsEl.textContent = `Баллы: ${u.points}`;
+
+  // Вычисляем место пользователя
+  const q = query(collection(db,'users'), orderBy('points','desc'));
+  const snap = await getDocs(q);
+
+  let place = 0;
+  let lastPoints = null;
+  let rank = 0;
+
+  snap.forEach(docSnap => {
+    const data = docSnap.data();
+    rank++;
+    if(data.points !== lastPoints){
+      place = rank;
+      lastPoints = data.points;
+    }
+    if(docSnap.id === user.uid){
+      placeEl.textContent = `Место: ${place}`;
+    }
+  });
+
+  // Кнопка перехода на лидерборд
+  leaderboardBtn.onclick = () => location.href='leaderboard.html';
+
+  // Кнопка "Проверить" для модеров
+  btn.onclick = () => {
+    if(u.role==='moderator') location.href='moderator.html';
+    else if(u.role==='elder') location.href='elder.html';
+    else err.textContent = 'Ошибка: модерки нет';
+  };
 });
-
-window.logout = () => signOut(auth).then(()=>window.location.href="./index.html");
 </script>
 </body>
 </html>
