@@ -24,6 +24,7 @@
     <button data-tab="appeals">Апелляции</button>
     <button data-tab="levelSubmissions">Заявки уровней</button>
     <button data-tab="completionSubmissions">Заявки прохождений</button>
+    <button data-tab="levelsManage">Лист уровней</button>
     <button data-tab="manualLevel">Поставить уровень</button>
   </div>
 
@@ -42,6 +43,7 @@
   <div id="appeals" class="panel"></div>
   <div id="levelSubmissions" class="panel"></div>
   <div id="completionSubmissions" class="panel"></div>
+  <div id="levelsManage" class="panel"></div>
   <div id="manualLevel" class="panel">
     <div class="row">
       <b>Ручное добавление уровня в лист</b>
@@ -60,7 +62,7 @@ import { auth, db } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
 import {
   collection, query, orderBy, getDocs, doc, updateDoc, getDoc,
-  serverTimestamp, setDoc, where, addDoc
+  serverTimestamp, setDoc, where, addDoc, deleteDoc
 } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
 const statusEl = document.getElementById('status');
@@ -303,6 +305,54 @@ async function loadCompletionSubmissions(elder){
   });
 }
 
+async function loadLevelsManage(elder){
+  const box = document.getElementById('levelsManage');
+  box.innerHTML = 'Загрузка листа уровней...';
+  const snap = await getDocs(query(collection(db,'levels'), orderBy('rank','asc')));
+  if(snap.empty){ box.innerHTML='<p>Лист уровней пуст.</p>'; return; }
+  box.innerHTML = '';
+
+  snap.forEach(d=>{
+    const lv = d.data();
+    if(lv.status === 'archived') return;
+
+    const row = document.createElement('div');
+    row.className='row';
+    row.innerHTML = `
+      <b>#${lv.rank ?? '—'}</b><br>
+      <a href="${lv.link}" target="_blank">Ссылка</a>
+      <textarea class="text">${lv.text ?? ''}</textarea>
+      <input class="link" value="${lv.link ?? ''}" placeholder="Ссылка">
+      <input class="file" value="${lv.fileUrl ?? ''}" placeholder="Файл">
+      <input class="rank" type="number" min="1" value="${lv.rank ?? 1}" placeholder="Место">
+      <div class="top-actions">
+        <button class="save">Сохранить изменения</button>
+        <button class="delete btn-danger">Удалить уровень</button>
+      </div>
+    `;
+    box.appendChild(row);
+
+    row.querySelector('.save').onclick = async ()=>{
+      const rank = Number(row.querySelector('.rank').value);
+      const link = row.querySelector('.link').value.trim();
+      const text = row.querySelector('.text').value.trim();
+      const fileUrl = row.querySelector('.file').value.trim();
+      if(!rank || !link){ alert('Нужны место и ссылка'); return; }
+      await updateDoc(doc(db,'levels',d.id), {
+        rank, link, text, fileUrl,
+        updatedBy: elder.uid, updatedAt: serverTimestamp()
+      });
+      row.style.outline = '1px solid rgba(32,245,204,.7)';
+    };
+
+    row.querySelector('.delete').onclick = async ()=>{
+      if(!confirm('Удалить уровень из листа?')) return;
+      await deleteDoc(doc(db,'levels',d.id));
+      row.remove();
+    };
+  });
+}
+
 onAuthStateChanged(auth, async user=>{
   if(!user) return location.href='index.html';
 
@@ -317,7 +367,8 @@ onAuthStateChanged(auth, async user=>{
       loadSettings(),
       loadAppeals(user.uid),
       loadLevelSubmissions({uid:user.uid, nick:me.nick}),
-      loadCompletionSubmissions({uid:user.uid, nick:me.nick})
+      loadCompletionSubmissions({uid:user.uid, nick:me.nick}),
+      loadLevelsManage({uid:user.uid, nick:me.nick})
     ]);
     statusEl.textContent = '';
 
