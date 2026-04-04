@@ -5,39 +5,111 @@
 <title>Leaderboard</title>
 <link rel="stylesheet" href="hud.css">
 <style>
-  .tabs button{margin-right:8px}
   .panel{display:none}
   .panel.active{display:block}
-  .item{border:1px solid #2d8cff55;background:rgba(0,20,50,.35);padding:8px;border-radius:8px;margin-bottom:8px}
+  .item{border:1px solid #2d8cff55;background:rgba(0,20,50,.35);padding:10px;border-radius:10px;margin-bottom:10px}
+  .item input,.item textarea{width:100%;margin-top:6px}
 </style>
 </head>
 <body>
 
 <div class="hud" style="max-width:1000px;margin:40px auto;">
-<h1>Лидерборд</h1>
-<p id="status" style="margin:8px 0 14px;color:#00ffff;">Загрузка...</p>
-<div class="tabs">
-  <button data-tab="players">Игроки</button>
-  <button data-tab="levels">Лист уровней</button>
-</div>
-<div id="players" class="panel active"><div id="playersList"></div></div>
-<div id="levels" class="panel"><div id="levelsList"></div></div>
+  <div class="page-header">
+    <h1 style="margin:0;">Лидерборд и лист</h1>
+    <button id="backMain" class="btn-ghost">На главную</button>
+  </div>
+  <p id="status" style="margin:8px 0 14px;color:#00ffff;">Загрузка...</p>
+  <div class="tabs">
+    <button data-tab="players">Игроки</button>
+    <button data-tab="levels">Лист уровней</button>
+    <button data-tab="menu">Меню уровней</button>
+  </div>
+  <div id="players" class="panel active"><div id="playersList"></div></div>
+  <div id="levels" class="panel"><div id="levelsList"></div></div>
+  <div id="menu" class="panel">
+    <div class="card">
+      <h2 style="margin-top:0;">Меню уровней для игроков</h2>
+      <div class="menu-grid">
+        <button id="goSubmitLevel">Отправить уровень</button>
+        <button id="goSubmitCompletion">Отправить прохождение</button>
+        <button id="goSubmitAppeal">Отправить апелляцию</button>
+        <button id="goMySubmissions">Мои отправки</button>
+      </div>
+    </div>
+    <div id="moderatorMenuCard" class="card" style="margin-top:12px;display:none;">
+      <h2 style="margin-top:0;">Меню уровней для модераторов</h2>
+      <p class="small">Управление отправками и ручная постановка уровней.</p>
+      <div class="top-actions">
+        <button id="goModeratorLevels" class="btn-hero">Открыть модерацию уровней</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script type="module">
 import { auth, db } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import { collection, query, orderBy, getDocs, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+import { collection, query, orderBy, getDocs, doc, getDoc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
 const statusEl = document.getElementById('status');
 const playersList = document.getElementById('playersList');
 const levelsList = document.getElementById('levelsList');
+let canModerateLevels = false;
 
 function setTab(id){
   document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
   document.getElementById(id).classList.add('active');
+  document.querySelectorAll('.tabs button').forEach(btn=>btn.classList.toggle('active', btn.dataset.tab===id));
 }
 document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
+document.getElementById('backMain').onclick = ()=> location.href='main.html';
+document.getElementById('goSubmitLevel').onclick = ()=> location.href='submit-level.html';
+document.getElementById('goSubmitCompletion').onclick = ()=> location.href='submit-completion.html';
+document.getElementById('goSubmitAppeal').onclick = ()=> location.href='submit-appeal.html';
+document.getElementById('goMySubmissions').onclick = ()=> location.href='my-submissions.html';
+document.getElementById('goModeratorLevels').onclick = ()=> location.href='moderator-levels.html';
+if(location.hash === '#menu') setTab('menu');
+else if(location.hash === '#levels') setTab('levels');
+else setTab('players');
+
+function renderLevel(levelDoc){
+  const lv = levelDoc.data();
+  if(lv.status === 'archived') return null;
+  const item = document.createElement('div');
+  item.className='item';
+
+  if(!canModerateLevels){
+    item.innerHTML = `<b>#${lv.rank ?? '—'}</b> · <a target="_blank" href="${lv.link}">Открыть уровень</a><br>${lv.text ?? ''}<br><span class="small">Файл: ${lv.fileUrl || '—'}</span>`;
+    return item;
+  }
+
+  item.innerHTML = `
+    <b>#${lv.rank ?? '—'}</b> · <a target="_blank" href="${lv.link}">Открыть уровень</a>
+    <textarea class="editText" placeholder="Описание">${lv.text ?? ''}</textarea>
+    <input class="editLink" value="${lv.link ?? ''}" placeholder="Ссылка на уровень">
+    <input class="editFile" value="${lv.fileUrl ?? ''}" placeholder="Ссылка на файл (опционально)">
+    <input class="editRank" type="number" min="1" value="${lv.rank ?? 1}" placeholder="Место">
+    <div class="top-actions">
+      <button class="saveLevel">Сохранить</button>
+      <button class="deleteLevel btn-danger">Удалить уровень</button>
+    </div>
+  `;
+  item.querySelector('.saveLevel').onclick = async ()=>{
+    const rank = Number(item.querySelector('.editRank').value);
+    const link = item.querySelector('.editLink').value.trim();
+    const text = item.querySelector('.editText').value.trim();
+    const fileUrl = item.querySelector('.editFile').value.trim();
+    if(!rank || !link){ alert('Нужны место и ссылка'); return; }
+    await updateDoc(doc(db,'levels',levelDoc.id), { rank, link, text, fileUrl });
+    item.style.outline = '1px solid rgba(32,245,204,.7)';
+  };
+  item.querySelector('.deleteLevel').onclick = async ()=>{
+    if(!confirm('Удалить уровень из листа?')) return;
+    await deleteDoc(doc(db,'levels',levelDoc.id));
+    item.remove();
+  };
+  return item;
+}
 
 onAuthStateChanged(auth, async u=>{
  if(!u) return location.href='index.html';
@@ -46,6 +118,10 @@ onAuthStateChanged(auth, async u=>{
   const meSnap = await getDoc(doc(db,'users',u.uid));
   const me = meSnap.exists() ? meSnap.data() : null;
   if(!me || me.situation!=='verified') return location.href='nick.html';
+  canModerateLevels = (me.role==='moderator' || me.role==='elder');
+  if(canModerateLevels){
+    document.getElementById('moderatorMenuCard').style.display = '';
+  }
 
   const usersSnap = await getDocs(query(collection(db,'users'),orderBy('points','desc')));
   let r=0,p=0,last=null;
@@ -69,11 +145,9 @@ onAuthStateChanged(auth, async u=>{
   } else {
     levelsSnap.forEach(d=>{
       const lv = d.data();
-      if(lv.status==='archived') return;
-      const item = document.createElement('div');
-      item.className='item';
-      item.innerHTML = `<b>#${lv.rank ?? '—'}</b> · <a target="_blank" href="${lv.link}">Открыть уровень</a><br>${lv.text ?? ''}<br><span style="font-size:12px;opacity:.85">Файл: ${lv.fileUrl || '—'}</span>`;
-      levelsList.appendChild(item);
+    if(lv.status==='archived') return;
+      const item = renderLevel(d);
+      if(item) levelsList.appendChild(item);
     });
   }
 
