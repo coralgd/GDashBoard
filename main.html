@@ -4,75 +4,189 @@
 <meta charset="UTF-8">
 <title>Main</title>
 <link rel="stylesheet" href="hud.css">
+<style>
+  .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap:14px; margin-top:20px; }
+  .card { padding:12px; border:1px solid #2d8cff55; border-radius:10px; background:rgba(0,20,50,.35); }
+  .card h3 { margin:0 0 10px; }
+  .card input,.card textarea { width:100%; margin-bottom:8px; }
+  .small { font-size:12px; opacity:.85; }
+  .item { padding:8px; border-bottom:1px solid #3a77aa33; }
+</style>
 </head>
 <body>
-<div class="hud" style="max-width:600px;margin:60px auto;text-align:center;">
+<div class="hud" style="max-width:1100px;margin:40px auto;">
   <h1>Главная страница</h1>
   <p id="status" style="color:#00ffff;">Загрузка профиля...</p>
   <p id="userInfo"></p>
   <p id="userPoints"></p>
   <p id="userPlace"></p>
 
-  <button id="leaderboardBtn" style="margin-top:20px;">Лидерборд</button>
-  <button id="check" style="margin-top:20px;">Проверить</button>
+  <button id="leaderboardBtn" style="margin-top:10px;">Лидерборд</button>
+  <button id="check" style="margin-top:10px;">Модерация</button>
   <p id="err" style="color:red;margin-top:10px;"></p>
+
+  <div class="grid2">
+    <div class="card">
+      <h3>Отправить уровень в лист</h3>
+      <input id="levelLink" placeholder="Ссылка на уровень">
+      <textarea id="levelText" placeholder="Описание / комментарий"></textarea>
+      <input id="levelFile" placeholder="Ссылка на файл (опционально)">
+      <button id="sendLevel">Отправить уровень</button>
+      <p id="levelMsg" class="small"></p>
+    </div>
+
+    <div class="card">
+      <h3>Отправить прохождение</h3>
+      <input id="compLink" placeholder="Ссылка на видео/доказательство">
+      <textarea id="compText" placeholder="Комментарий / детали"></textarea>
+      <input id="compFile" placeholder="Ссылка на файл (опционально)">
+      <button id="sendComp">Отправить прохождение</button>
+      <p id="compMsg" class="small"></p>
+    </div>
+
+    <div class="card">
+      <h3>Апелляция старшим модераторам</h3>
+      <input id="appealLink" placeholder="Ссылка (опционально)">
+      <textarea id="appealText" placeholder="Текст апелляции"></textarea>
+      <input id="appealFile" placeholder="Ссылка на файл (опционально)">
+      <button id="sendAppeal">Отправить апелляцию</button>
+      <p id="appealMsg" class="small"></p>
+    </div>
+
+    <div class="card">
+      <h3>Мои отправки и результаты</h3>
+      <div id="mySubmissions"></div>
+    </div>
+  </div>
 </div>
 
 <script type="module">
 import { auth, db } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import { doc, getDoc, collection, getDocs, query, orderBy } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+import {
+  doc, getDoc, collection, getDocs, query, orderBy, where,
+  addDoc, serverTimestamp
+} from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
+const statusEl = document.getElementById('status');
 const info = document.getElementById('userInfo');
 const pointsEl = document.getElementById('userPoints');
 const placeEl = document.getElementById('userPlace');
-const statusEl = document.getElementById('status');
 const err = document.getElementById('err');
-const btn = document.getElementById('check');
-const leaderboardBtn = document.getElementById('leaderboardBtn');
+
+let currentUser = null;
+let profile = null;
+
+function sortByCreatedAtDesc(arr){
+  return arr.sort((a,b)=> (b.createdAt?.seconds||0) - (a.createdAt?.seconds||0));
+}
+
+async function loadMySubmissions(uid){
+  const box = document.getElementById('mySubmissions');
+  box.innerHTML = 'Загрузка...';
+
+  const [levelsSnap, compSnap, appealsSnap] = await Promise.all([
+    getDocs(query(collection(db,'level_submissions'), where('authorId','==',uid))),
+    getDocs(query(collection(db,'completion_submissions'), where('playerId','==',uid))),
+    getDocs(query(collection(db,'appeals'), where('playerId','==',uid)))
+  ]);
+
+  const rows = [];
+  levelsSnap.forEach(d=>rows.push({type:'Уровень', id:d.id, ...d.data()}));
+  compSnap.forEach(d=>rows.push({type:'Прохождение', id:d.id, ...d.data()}));
+  appealsSnap.forEach(d=>rows.push({type:'Апелляция', id:d.id, ...d.data()}));
+
+  const sorted = sortByCreatedAtDesc(rows);
+  if(!sorted.length){
+    box.innerHTML = '<p class="small">Пока нет отправок.</p>';
+    return;
+  }
+
+  box.innerHTML = '';
+  sorted.slice(0, 50).forEach(x=>{
+    const div = document.createElement('div');
+    div.className = 'item';
+    div.innerHTML = `<b>${x.type}</b> · <span>${x.status ?? 'pending'}</span><br><span class="small">${x.note ?? ''}</span>`;
+    box.appendChild(div);
+  });
+}
 
 onAuthStateChanged(auth, async user => {
   if(!user) return location.href='index.html';
 
   try {
-    const userRef = doc(db,'users',user.uid);
-    const userSnap = await getDoc(userRef);
-    const u = userSnap.exists() ? userSnap.data() : null;
+    currentUser = user;
+    const userSnap = await getDoc(doc(db,'users',user.uid));
+    profile = userSnap.exists() ? userSnap.data() : null;
 
-    if(!u || u.situation !== 'verified') return location.href='nick.html';
+    if(!profile || profile.situation !== 'verified') return location.href='nick.html';
 
     statusEl.textContent = '';
-    info.textContent = `Ник: ${u.nick ?? '—'}`;
-    pointsEl.textContent = `Баллы: ${u.points ?? 0}`;
+    info.textContent = `Ник: ${profile.nick ?? '—'}`;
+    pointsEl.textContent = `Баллы: ${profile.points ?? 0}`;
 
-    const q = query(collection(db,'users'), orderBy('points','desc'));
-    const snap = await getDocs(q);
-
-    let place = 0;
-    let lastPoints = null;
-    let rank = 0;
-
-    snap.forEach(docSnap => {
-      const data = docSnap.data();
-      if(data.situation!=='verified') return;
+    const usersSnap = await getDocs(query(collection(db,'users'), orderBy('points','desc')));
+    let place = 0, rank = 0, last = null;
+    usersSnap.forEach(d=>{
+      const u = d.data();
+      if(u.situation!=='verified') return;
       rank++;
-      if(data.points !== lastPoints){
-        place = rank;
-        lastPoints = data.points;
-      }
-      if(docSnap.id === user.uid){
-        placeEl.textContent = `Место: ${place}`;
-      }
+      if(u.points !== last){ place = rank; last = u.points; }
+      if(d.id===user.uid) placeEl.textContent = `Место: ${place}`;
     });
+    if(!placeEl.textContent) placeEl.textContent='Место: —';
 
-    if(!placeEl.textContent) placeEl.textContent = 'Место: —';
+    await loadMySubmissions(user.uid);
 
-    leaderboardBtn.onclick = () => location.href='leaderboard.html';
-    btn.onclick = () => {
-      if(u.role==='moderator') location.href='moderator.html';
-      else if(u.role==='elder') location.href='elder.html';
-      else err.textContent = 'Ошибка: модерки нет';
+    document.getElementById('leaderboardBtn').onclick = ()=> location.href='leaderboard.html';
+    document.getElementById('check').onclick = ()=>{
+      if(profile.role==='moderator') location.href='moderator.html';
+      else if(profile.role==='elder') location.href='elder.html';
+      else err.textContent='Доступно только модераторам';
     };
+
+    document.getElementById('sendLevel').onclick = async ()=>{
+      const link = document.getElementById('levelLink').value.trim();
+      const text = document.getElementById('levelText').value.trim();
+      const fileUrl = document.getElementById('levelFile').value.trim();
+      const msg = document.getElementById('levelMsg');
+      if(!link || !text){ msg.textContent='Нужны ссылка и текст'; return; }
+      await addDoc(collection(db,'level_submissions'), {
+        authorId:user.uid, nick:profile.nick ?? 'Без ника', link, text, fileUrl,
+        status:'pending', note:'', createdAt:serverTimestamp()
+      });
+      msg.textContent='Отправлено на проверку модераторам.';
+      await loadMySubmissions(user.uid);
+    };
+
+    document.getElementById('sendComp').onclick = async ()=>{
+      const link = document.getElementById('compLink').value.trim();
+      const text = document.getElementById('compText').value.trim();
+      const fileUrl = document.getElementById('compFile').value.trim();
+      const msg = document.getElementById('compMsg');
+      if(!link || !text){ msg.textContent='Нужны ссылка и текст'; return; }
+      await addDoc(collection(db,'completion_submissions'), {
+        playerId:user.uid, nick:profile.nick ?? 'Без ника', link, text, fileUrl,
+        status:'pending', note:'', awardedPoints:0, createdAt:serverTimestamp()
+      });
+      msg.textContent='Прохождение отправлено на проверку модераторам.';
+      await loadMySubmissions(user.uid);
+    };
+
+    document.getElementById('sendAppeal').onclick = async ()=>{
+      const link = document.getElementById('appealLink').value.trim();
+      const text = document.getElementById('appealText').value.trim();
+      const fileUrl = document.getElementById('appealFile').value.trim();
+      const msg = document.getElementById('appealMsg');
+      if(!text){ msg.textContent='Нужен текст апелляции'; return; }
+      await addDoc(collection(db,'appeals'), {
+        playerId:user.uid, nick:profile.nick ?? 'Без ника', link, text, fileUrl,
+        status:'pending', note:'', createdAt:serverTimestamp()
+      });
+      msg.textContent='Апелляция отправлена старшим модераторам.';
+      await loadMySubmissions(user.uid);
+    };
+
   } catch (e) {
     console.error(e);
     statusEl.textContent = 'Не удалось загрузить профиль.';
