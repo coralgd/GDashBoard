@@ -8,11 +8,9 @@
   .panel{display:none}
   .panel.active{display:block}
   .item{border:1px solid #2d8cff55;background:rgba(0,20,50,.35);padding:10px;border-radius:10px;margin-bottom:10px}
-  .badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:rgba(0,170,255,.18);border:1px solid rgba(0,170,255,.35);font-size:12px}
 </style>
 </head>
 <body>
-
 <div class="hud" style="max-width:1080px;margin:30px auto;">
   <div class="page-header">
     <h1 style="margin:0;">Лидерборд и лист</h1>
@@ -22,15 +20,11 @@
   <div class="stats-grid">
     <div class="stat"><div class="small">Верифицированных игроков</div><b id="statPlayers">—</b></div>
     <div class="stat"><div class="small">Уровней в листе</div><b id="statLevels">—</b></div>
-    <div class="stat"><div class="small">Режим</div><b class="badge">Публичный лист</b></div>
   </div>
-
-  <p id="status" style="margin:8px 0 14px;color:#00ffff;">Загрузка...</p>
 
   <div class="tabs">
     <button data-tab="players">Игроки</button>
     <button data-tab="levels">Лист уровней</button>
-    <button data-tab="menu">Меню уровней</button>
   </div>
 
   <div id="players" class="panel active">
@@ -40,7 +34,7 @@
         <option value="all">Все роли</option>
         <option value="player">Игроки</option>
         <option value="moderator">Модераторы</option>
-        <option value="elder">Элдеры</option>
+        <option value="elder">Старшие модеры</option>
       </select>
     </div>
     <div id="playersList"></div>
@@ -56,19 +50,6 @@
     </div>
     <div id="levelsList"></div>
   </div>
-
-  <div id="menu" class="panel">
-    <div class="card">
-      <h2 style="margin-top:0;">Меню уровней для игроков</h2>
-      <div class="menu-grid">
-        <button id="goSubmitLevel">Отправить уровень</button>
-        <button id="goSubmitCompletion">Отправить прохождение</button>
-        <button id="goSubmitAppeal">Отправить апелляцию</button>
-        <button id="goMySubmissions">Мои отправки</button>
-      </div>
-      <p class="small" style="margin-top:10px;">Модерация перенесена в отдельную панель модератора.</p>
-    </div>
-  </div>
 </div>
 
 <script type="module">
@@ -76,14 +57,12 @@ import { auth, db } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
 import { collection, query, orderBy, getDocs, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
-const statusEl = document.getElementById('status');
 const playersList = document.getElementById('playersList');
 const levelsList = document.getElementById('levelsList');
 const playerSearch = document.getElementById('playerSearch');
 const roleFilter = document.getElementById('roleFilter');
 const levelSearch = document.getElementById('levelSearch');
 const levelSort = document.getElementById('levelSort');
-
 const statPlayers = document.getElementById('statPlayers');
 const statLevels = document.getElementById('statLevels');
 
@@ -144,9 +123,7 @@ function renderPlayers(){
     playersList.appendChild(row);
   });
 
-  if(!playersList.childElementCount){
-    playersList.innerHTML = '<p>Ничего не найдено по текущим фильтрам.</p>';
-  }
+  if(!playersList.childElementCount) playersList.innerHTML = '<p>Ничего не найдено.</p>';
 }
 
 function renderLevels(){
@@ -154,18 +131,14 @@ function renderLevels(){
   const sortMode = levelSort.value;
   levelsList.innerHTML = '';
 
-  let list = [...levelsCache];
-  list = list.filter(({data}) => data.status !== 'archived');
-  list = list.filter(({data}) => {
-    const hay = `${data.text ?? ''} ${data.link ?? ''}`.toLowerCase();
-    return !q || hay.includes(q);
-  });
-
-  list.sort((a,b)=>{
-    const ar = Number(a.data.rank ?? 999999);
-    const br = Number(b.data.rank ?? 999999);
-    return sortMode === 'rankDesc' ? br - ar : ar - br;
-  });
+  const list = levelsCache
+    .filter(({data}) => data.status !== 'archived')
+    .filter(({data}) => (`${data.text ?? ''} ${data.link ?? ''}`).toLowerCase().includes(q))
+    .sort((a,b)=>{
+      const ar = Number(a.data.rank ?? 999999);
+      const br = Number(b.data.rank ?? 999999);
+      return sortMode === 'rankDesc' ? br - ar : ar - br;
+    });
 
   list.forEach(({data})=>{
     const safeLink = normalizeUrl(data.link);
@@ -181,9 +154,7 @@ function renderLevels(){
     levelsList.appendChild(item);
   });
 
-  if(!levelsList.childElementCount){
-    levelsList.innerHTML = '<p>По текущему фильтру уровни не найдены.</p>';
-  }
+  if(!levelsList.childElementCount) levelsList.innerHTML = '<p>Уровни не найдены.</p>';
 }
 
 async function refreshUsers(){
@@ -192,7 +163,7 @@ async function refreshUsers(){
   usersSnap.forEach(d=>{
     const u = d.data();
     if(u.situation!=='verified') return;
-    usersCache.push({ id: d.id, data: u });
+    usersCache.push({ id:d.id, data:u });
   });
   statPlayers.textContent = String(usersCache.length);
   renderPlayers();
@@ -201,7 +172,7 @@ async function refreshUsers(){
 async function refreshLevels(){
   const levelsSnap = await getDocs(query(collection(db,'levels'), orderBy('rank','asc')));
   levelsCache = [];
-  levelsSnap.forEach(d=>levelsCache.push({ id: d.id, data: d.data() }));
+  levelsSnap.forEach(d=>levelsCache.push({ id:d.id, data:d.data() }));
   statLevels.textContent = String(levelsCache.filter(x=>x.data.status!=='archived').length);
   renderLevels();
 }
@@ -211,33 +182,16 @@ playerSearch.oninput = renderPlayers;
 roleFilter.onchange = renderPlayers;
 levelSearch.oninput = renderLevels;
 levelSort.onchange = renderLevels;
-
 document.getElementById('backMain').onclick = ()=> location.href='main.html';
-document.getElementById('goSubmitLevel').onclick = ()=> location.href='submit-level.html';
-document.getElementById('goSubmitCompletion').onclick = ()=> location.href='submit-completion.html';
-document.getElementById('goSubmitAppeal').onclick = ()=> location.href='submit-appeal.html';
-document.getElementById('goMySubmissions').onclick = ()=> location.href='my-submissions.html';
-
-if(location.hash === '#menu') setTab('menu');
-else if(location.hash === '#levels') setTab('levels');
-else setTab('players');
 
 onAuthStateChanged(auth, async u=>{
   if(!u) return location.href='index.html';
-
-  try {
-    currentUid = u.uid;
-    const meSnap = await getDoc(doc(db,'users',u.uid));
-    const me = meSnap.exists() ? meSnap.data() : null;
-    if(!me || me.situation!=='verified') return location.href='nick.html';
-
-    await refreshUsers();
-    await refreshLevels();
-    statusEl.textContent = '';
-  } catch (e) {
-    console.error(e);
-    statusEl.textContent='Не удалось загрузить данные. Попробуйте позже.';
-  }
+  const meSnap = await getDoc(doc(db,'users',u.uid));
+  const me = meSnap.exists() ? meSnap.data() : null;
+  if(!me || me.situation!=='verified') return location.href='nick.html';
+  currentUid = u.uid;
+  await refreshUsers();
+  await refreshLevels();
 });
 </script>
 </body>
