@@ -67,7 +67,7 @@ onAuthStateChanged(auth, async user => {
     document.getElementById('check').onclick = ()=>{
       if(profile.role==='moderator') location.href='moderator.html';
       else if(profile.role==='elder') location.href='elder.html';
-      else err.textContent='Доступно только модерторам';
+      else err.textContent='Доступно только модераторам';
     };
 
   } catch (e) {

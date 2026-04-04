@@ -9,26 +9,25 @@
   .panel.active{display:block}
   .row{border:1px solid #2d8cff55;background:rgba(0,20,50,.35);padding:12px;border-radius:10px;margin-bottom:12px}
   .row input,.row textarea{width:100%;margin:6px 0}
-  .small{font-size:12px;opacity:.85}
 </style>
 </head>
 <body>
-<div class="hud" style="max-width:1000px;margin:40px auto;">
-  <h1>Панель модератора</h1>
+<div class="hud" style="max-width:1080px;margin:40px auto;">
+  <div class="page-header">
+    <h1 style="margin:0;">Панель модератора</h1>
+    <button id="backMain" class="btn-ghost">На главную</button>
+  </div>
   <p id="status" style="color:#00ffff;">Загрузка...</p>
 
-  <div class="top-actions">
-    <button id="openLevelsModeratorMenu" class="btn-hero">Меню уровней</button>
-  </div>
-  <div id="levelsModeratorMenu" class="menu-panel open">
-    <div class="menu-grid">
-      <button data-tab="levels">Заявки уровней</button>
-      <button data-tab="completions">Заявки прохождений</button>
-      <button data-tab="manual">Поставить уровень в лист</button>
-    </div>
+  <div class="tabs">
+    <button data-tab="users">Игроки / верификация</button>
+    <button data-tab="levels">Заявки уровней</button>
+    <button data-tab="completions">Заявки прохождений</button>
+    <button data-tab="manual">Поставить уровень в лист</button>
   </div>
 
-  <div id="levels" class="panel active"></div>
+  <div id="users" class="panel active"></div>
+  <div id="levels" class="panel"></div>
   <div id="completions" class="panel"></div>
   <div id="manual" class="panel">
     <div class="row">
@@ -47,19 +46,30 @@
 import { auth, db } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
 import {
-  collection, query, where, getDocs, doc, updateDoc, getDoc, addDoc, serverTimestamp
+  collection, query, where, orderBy, getDocs, doc, updateDoc, getDoc, addDoc, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
 const statusEl = document.getElementById('status');
 
+document.getElementById('backMain').onclick = ()=> location.href='main.html';
 function setTab(id){
   document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
   document.getElementById(id).classList.add('active');
+  document.querySelectorAll('.tabs button').forEach(btn=>btn.classList.toggle('active', btn.dataset.tab===id));
 }
 document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
-document.getElementById('openLevelsModeratorMenu').onclick = ()=>{
-  document.getElementById('levelsModeratorMenu').classList.toggle('open');
-};
+
+function normalizeUrl(input){
+  const value = (input ?? '').trim();
+  if(!value) return '';
+  try {
+    const parsed = new URL(value);
+    if(parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '';
+    return parsed.toString();
+  } catch {
+    return '';
+  }
+}
 
 async function getScoring(){
   const snap = await getDoc(doc(db,'settings','scoring'));
@@ -72,17 +82,57 @@ async function getScoring(){
 }
 
 function calculateCompletionPoints(listRank, listSize, approvedCompletionsCount, scoringSettings){
-  let normalizedListSize = listSize;
-  if(!normalizedListSize || normalizedListSize < 2) normalizedListSize = 2;
-
-  let normalizedRank = listRank;
-  if(normalizedRank < 1) normalizedRank = 1;
-  if(normalizedRank > normalizedListSize) normalizedRank = normalizedListSize;
-
+  const normalizedListSize = Math.max(2, Number(listSize || 2));
+  const normalizedRank = Math.max(1, Math.min(Number(listRank || 1), normalizedListSize));
   const normalizedPosition = (normalizedRank - 1) / (normalizedListSize - 1);
   const positionScore = scoringSettings.maximumPoints * Math.exp(-scoringSettings.rankDecayFactor * normalizedPosition);
   const antiGrindMultiplier = 1 / Math.pow(Math.max(1, approvedCompletionsCount), scoringSettings.repeatPenaltyPower);
   return Math.round(positionScore * antiGrindMultiplier * 100) / 100;
+}
+
+async function loadUsers(){
+  const box = document.getElementById('users');
+  box.innerHTML = 'Загрузка игроков...';
+  const snap = await getDocs(query(collection(db,'users'), orderBy('nick','asc')));
+  if(snap.empty){ box.innerHTML = '<p>Нет пользователей.</p>'; return; }
+
+  box.innerHTML = '';
+  snap.forEach(d=>{
+    const u = d.data();
+    const row = document.createElement('div');
+    row.className='row';
+    row.innerHTML = `
+      <b>${u.nick ?? 'Без ника'}</b> · роль: ${u.role ?? 'player'} · статус: ${u.situation ?? 'not requested'}<br>
+      <p class="small">email: ${u.email ?? '—'} · points: ${Number(u.points ?? 0)}</p>
+      <div class="top-actions">
+        <button class="verifyBtn">${u.situation==='verified' ? 'Снять верификацию' : 'Верифицировать'}</button>
+        <button class="resetPoints btn-danger">Сбросить очки</button>
+      </div>
+    `;
+    box.appendChild(row);
+
+    const verifyBtn = row.querySelector('.verifyBtn');
+    verifyBtn.onclick = async ()=>{
+      const nextSituation = u.situation === 'verified' ? 'not requested' : 'verified';
+      await updateDoc(doc(db,'users',d.id), {
+        situation: nextSituation,
+        reviewedBy: auth.currentUser.uid,
+        reviewedAt: serverTimestamp()
+      });
+      u.situation = nextSituation;
+      verifyBtn.textContent = u.situation==='verified' ? 'Снять верификацию' : 'Верифицировать';
+    };
+
+    row.querySelector('.resetPoints').onclick = async ()=>{
+      if(!confirm('Сбросить очки игрока до 0?')) return;
+      await updateDoc(doc(db,'users',d.id), {
+        points: 0,
+        reviewedBy: auth.currentUser.uid,
+        reviewedAt: serverTimestamp()
+      });
+      row.querySelector('.small').textContent = `email: ${u.email ?? '—'} · points: 0`;
+    };
+  });
 }
 
 async function loadPendingLevels(me){
@@ -94,13 +144,16 @@ async function loadPendingLevels(me){
 
   snap.forEach(d=>{
     const s = d.data();
+    const link = normalizeUrl(s.link);
+    const fileUrl = normalizeUrl(s.fileUrl);
+
     const row = document.createElement('div');
     row.className='row';
     row.innerHTML = `
       <b>${s.nick ?? 'Без ника'}</b><br>
-      <a href="${s.link}" target="_blank">Ссылка</a>
+      ${link ? `<a href="${link}" target="_blank" rel="noopener noreferrer">Ссылка</a>` : '<span class="small">Некорректная ссылка</span>'}
       <p>${s.text ?? ''}</p>
-      <p class="small">Файл: ${s.fileUrl || '—'}</p>
+      <p class="small">Файл: ${fileUrl || '—'}</p>
       <input placeholder="Комментарий модератора" class="note">
       <input type="number" min="1" placeholder="Место в листе" class="rank">
       <div class="top-actions">
@@ -113,9 +166,9 @@ async function loadPendingLevels(me){
     row.querySelector('.approve').onclick = async ()=>{
       const note = row.querySelector('.note').value.trim();
       const rank = Number(row.querySelector('.rank').value);
-      if(!rank){ alert('Укажи место'); return; }
+      if(!rank || !link){ alert('Укажи корректные место и ссылку'); return; }
       await addDoc(collection(db,'levels'), {
-        link:s.link, text:s.text ?? '', fileUrl:s.fileUrl ?? '', rank,
+        link, text:s.text ?? '', fileUrl, rank,
         addedBy:me.uid, addedByNick:me.nick ?? 'moderator', createdAt:serverTimestamp(),
         sourceSubmissionId:d.id, status:'active'
       });
@@ -151,13 +204,16 @@ async function loadPendingCompletions(me){
 
   snap.forEach(d=>{
     const s = d.data();
+    const link = normalizeUrl(s.link);
+    const fileUrl = normalizeUrl(s.fileUrl);
+
     const row = document.createElement('div');
     row.className='row';
     row.innerHTML = `
       <b>${s.nick ?? 'Без ника'}</b><br>
-      <a href="${s.link}" target="_blank">Доказательство</a>
+      ${link ? `<a href="${link}" target="_blank" rel="noopener noreferrer">Доказательство</a>` : '<span class="small">Некорректная ссылка</span>'}
       <p>${s.text ?? ''}</p>
-      <p class="small">Файл: ${s.fileUrl || '—'}</p>
+      <p class="small">Файл: ${fileUrl || '—'}</p>
       <input type="number" min="1" max="${quantity}" placeholder="Место уровня в листе" class="rank">
       <input placeholder="Комментарий модератора" class="note">
       <div class="top-actions">
@@ -170,7 +226,7 @@ async function loadPendingCompletions(me){
     row.querySelector('.approve').onclick = async ()=>{
       const note = row.querySelector('.note').value.trim();
       const rank = Number(row.querySelector('.rank').value);
-      if(!rank){ alert('Укажи место уровня'); return; }
+      if(!rank || !link){ alert('Укажи корректные место и ссылку'); return; }
 
       const userRef = doc(db,'users',s.playerId);
       const userSnap = await getDoc(userRef);
@@ -211,17 +267,18 @@ onAuthStateChanged(auth, async user => {
     if(!me || me.situation!=='verified') return location.href='nick.html';
     if(me.role!=='moderator' && me.role!=='elder') return location.href='main.html';
 
+    await loadUsers();
     await loadPendingLevels({uid:user.uid, nick:me.nick});
     await loadPendingCompletions({uid:user.uid, nick:me.nick});
     statusEl.textContent = '';
 
     document.getElementById('mAdd').onclick = async ()=>{
-      const link = document.getElementById('mLink').value.trim();
+      const link = normalizeUrl(document.getElementById('mLink').value);
       const text = document.getElementById('mText').value.trim();
-      const fileUrl = document.getElementById('mFile').value.trim();
+      const fileUrl = normalizeUrl(document.getElementById('mFile').value);
       const rank = Number(document.getElementById('mRank').value);
       const msg = document.getElementById('mMsg');
-      if(!link || !text || !rank){ msg.textContent='Нужны ссылка, текст и место'; return; }
+      if(!link || !text || !rank){ msg.textContent='Нужны корректные ссылка, текст и место'; return; }
       await addDoc(collection(db,'levels'), {
         link, text, fileUrl, rank,
         addedBy:user.uid, addedByNick:me.nick ?? 'moderator', createdAt:serverTimestamp(),

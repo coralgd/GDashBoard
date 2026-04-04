@@ -60,6 +60,48 @@ h1,h2 {
   letter-spacing: 0.08em;
   text-shadow: 0 0 10px rgba(0,160,255,0.5);
 }
+.small { font-size: 12px; opacity: .85; }
+
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.tabs button.active {
+  filter: brightness(1.15);
+  box-shadow: 0 0 24px rgba(32,245,204,.55);
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit,minmax(160px,1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.stat {
+  border: 1px solid rgba(0,170,255,.3);
+  border-radius: 10px;
+  padding: 10px;
+  background: rgba(0,20,45,.35);
+}
+
+.toolbar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit,minmax(180px,1fr));
+  gap: 8px;
+  margin: 10px 0;
+}
 
 button {
   background: linear-gradient(135deg, #0ab0ff, #0076ff);
