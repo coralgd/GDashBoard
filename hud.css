@@ -133,6 +133,51 @@ input, textarea, select {
   background: rgba(0,20,45,0.35);
 }
 
+.btn-danger {
+  background: linear-gradient(135deg, #ff5e7a, #ff2f62);
+  color: #1f0010;
+}
+
+.btn-success {
+  background: linear-gradient(135deg, #20f5cc, #02caa1);
+  color: #001d16;
+}
+
+.btn-ghost {
+  background: transparent;
+  color: #9eddff;
+  border: 1px solid rgba(0,180,255,0.45);
+  box-shadow: none;
+}
+
+.btn-hero {
+  font-size: 16px;
+  padding: 14px 20px;
+  letter-spacing: .06em;
+}
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 8, 18, 0.8);
+  backdrop-filter: blur(4px);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+
+.dialog-backdrop.open { display: flex; }
+
+.dialog {
+  width: min(760px, 92vw);
+  border: 1px solid rgba(0,180,255,0.45);
+  border-radius: 14px;
+  padding: 16px;
+  background: linear-gradient(180deg, rgba(10,22,40,.95), rgba(5,12,24,.95));
+  box-shadow: 0 0 40px rgba(0,170,255,.35);
+}
+
 @media (max-width: 700px) {
   .row {
     grid-template-columns: 1fr;

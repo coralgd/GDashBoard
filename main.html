@@ -14,20 +14,27 @@
   <p id="userPlace"></p>
 
   <div class="top-actions" style="justify-content:center;">
-    <button id="leaderboardBtn">Лидерборд и лист</button>
-    <button id="openLevelsMenu">Меню уровней</button>
-    <button id="check">Модерация</button>
+    <button id="leaderboardBtn" class="btn-hero">Лидерборд и лист</button>
+    <button id="openLevelsMenu" class="btn-hero">Открыть меню уровней</button>
+    <button id="check" class="btn-hero">Модерация</button>
   </div>
-  <div id="levelsMenu" class="menu-panel">
+
+  <p id="err" style="color:red;margin-top:12px;"></p>
+</div>
+
+<div id="levelsDialog" class="dialog-backdrop">
+  <div class="dialog">
+    <h2 style="margin-top:0">Меню уровней</h2>
     <div class="menu-grid">
       <button id="goSubmitLevel">Отправить уровень</button>
       <button id="goSubmitCompletion">Отправить прохождение</button>
       <button id="goSubmitAppeal">Отправить апелляцию</button>
       <button id="goMySubmissions">Мои отправки</button>
     </div>
+    <div class="top-actions">
+      <button id="closeLevelsDialog" class="btn-ghost">Закрыть</button>
+    </div>
   </div>
-
-  <p id="err" style="color:red;margin-top:12px;"></p>
 </div>
 
 <script type="module">
@@ -66,7 +73,13 @@ onAuthStateChanged(auth, async user => {
 
     document.getElementById('leaderboardBtn').onclick = ()=> location.href='leaderboard.html';
     document.getElementById('openLevelsMenu').onclick = ()=>{
-      document.getElementById('levelsMenu').classList.toggle('open');
+      document.getElementById('levelsDialog').classList.add('open');
+    };
+    document.getElementById('closeLevelsDialog').onclick = ()=>{
+      document.getElementById('levelsDialog').classList.remove('open');
+    };
+    document.getElementById('levelsDialog').onclick = (e)=>{
+      if(e.target.id === 'levelsDialog') e.currentTarget.classList.remove('open');
     };
     document.getElementById('check').onclick = ()=>{
       if(profile.role==='moderator') location.href='moderator.html';

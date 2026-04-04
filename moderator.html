@@ -18,7 +18,7 @@
   <p id="status" style="color:#00ffff;">Загрузка...</p>
 
   <div class="top-actions">
-    <button id="openLevelsModeratorMenu">Меню уровней</button>
+    <button id="openLevelsModeratorMenu" class="btn-hero">Меню уровней</button>
   </div>
   <div id="levelsModeratorMenu" class="menu-panel open">
     <div class="menu-grid">
@@ -37,7 +37,7 @@
       <textarea id="mText" placeholder="Описание"></textarea>
       <input id="mFile" placeholder="Ссылка на файл (опционально)">
       <input id="mRank" type="number" min="1" placeholder="Место в листе">
-      <button id="mAdd">Добавить в лист</button>
+      <button id="mAdd" class="btn-success">Добавить в лист</button>
       <p id="mMsg" class="small"></p>
     </div>
   </div>
@@ -103,8 +103,10 @@ async function loadPendingLevels(me){
       <p class="small">Файл: ${s.fileUrl || '—'}</p>
       <input placeholder="Комментарий модератора" class="note">
       <input type="number" min="1" placeholder="Место в листе" class="rank">
-      <button class="approve">Одобрить и поставить в лист</button>
-      <button class="reject">Отклонить</button>
+      <div class="top-actions">
+        <button class="approve btn-success">Одобрить и поставить в лист</button>
+        <button class="reject btn-danger">Отклонить</button>
+      </div>
     `;
     box.appendChild(row);
 
@@ -158,8 +160,10 @@ async function loadPendingCompletions(me){
       <p class="small">Файл: ${s.fileUrl || '—'}</p>
       <input type="number" min="1" max="${quantity}" placeholder="Место уровня в листе" class="rank">
       <input placeholder="Комментарий модератора" class="note">
-      <button class="approve">Подтвердить прохождение</button>
-      <button class="reject">Отклонить</button>
+      <div class="top-actions">
+        <button class="approve btn-success">Подтвердить прохождение</button>
+        <button class="reject btn-danger">Отклонить</button>
+      </div>
     `;
     box.appendChild(row);
 
