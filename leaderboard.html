@@ -90,6 +90,7 @@ function setTab(id){
   document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
   document.getElementById(id).classList.add('active');
   document.querySelectorAll('.tabs button').forEach(btn=>btn.classList.toggle('active', btn.dataset.tab===id));
+  history.replaceState(null, '', `#${id}`);
 }
 
 function renderPlayers(){
