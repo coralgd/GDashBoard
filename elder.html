@@ -28,10 +28,10 @@
   <div id="settings" class="panel">
     <div class="row">
       <b>Настройка формулы очков</b>
-      <input id="sMax" type="number" step="1" min="1" placeholder="maxPoints (например 100)">
-      <input id="sA" type="number" step="0.1" min="0" placeholder="decayA (например 3)">
-      <input id="sGrind" type="number" step="0.01" min="0" placeholder="grindPower (например 0.5)">
-      <p class="small">Формула: points = maxPoints * e^(-decayA*x) * 1/(k^grindPower), x=(rank-1)/(quantity-1)</p>
+      <input id="maximumPoints" type="number" step="1" min="1" placeholder="maximumPoints (например 100)">
+      <input id="rankDecayFactor" type="number" step="0.1" min="0" placeholder="rankDecayFactor (например 3)">
+      <input id="repeatPenaltyPower" type="number" step="0.01" min="0" placeholder="repeatPenaltyPower (например 0.5)">
+      <p class="small">Формула: points = maximumPoints * e^(-rankDecayFactor*x) * 1/(k^repeatPenaltyPower), x=(rank-1)/(quantity-1)</p>
       <button id="saveSettings">Сохранить параметры</button>
       <p id="settingsMsg" class="small"></p>
     </div>
@@ -95,9 +95,9 @@ async function loadUsers(){
 async function loadSettings(){
   const snap = await getDoc(doc(db,'settings','scoring'));
   const s = snap.exists() ? snap.data() : {};
-  document.getElementById('sMax').value = s.maxPoints ?? 100;
-  document.getElementById('sA').value = s.decayA ?? 3;
-  document.getElementById('sGrind').value = s.grindPower ?? 0.5;
+  document.getElementById('maximumPoints').value = s.maximumPoints ?? s.maxPoints ?? 100;
+  document.getElementById('rankDecayFactor').value = s.rankDecayFactor ?? s.decayA ?? 3;
+  document.getElementById('repeatPenaltyPower').value = s.repeatPenaltyPower ?? s.grindPower ?? 0.5;
 }
 
 async function loadAppeals(elderUid){
@@ -151,12 +151,15 @@ onAuthStateChanged(auth, async user=>{
     statusEl.textContent = '';
 
     document.getElementById('saveSettings').onclick = async ()=>{
-      const maxPoints = Number(document.getElementById('sMax').value);
-      const decayA = Number(document.getElementById('sA').value);
-      const grindPower = Number(document.getElementById('sGrind').value);
+      const maximumPoints = Number(document.getElementById('maximumPoints').value);
+      const rankDecayFactor = Number(document.getElementById('rankDecayFactor').value);
+      const repeatPenaltyPower = Number(document.getElementById('repeatPenaltyPower').value);
       const msg = document.getElementById('settingsMsg');
       await setDoc(doc(db,'settings','scoring'), {
-        maxPoints, decayA, grindPower, updatedBy:user.uid, updatedAt:serverTimestamp()
+        maximumPoints, rankDecayFactor, repeatPenaltyPower,
+        // backward-compatible aliases
+        maxPoints: maximumPoints, decayA: rankDecayFactor, grindPower: repeatPenaltyPower,
+        updatedBy:user.uid, updatedAt:serverTimestamp()
       }, { merge:true });
       msg.textContent = 'Параметры сохранены.';
     };

@@ -58,20 +58,24 @@ async function getScoring(){
   const snap = await getDoc(doc(db,'settings','scoring'));
   const s = snap.exists() ? snap.data() : {};
   return {
-    maxPoints: Number(s.maxPoints ?? 100),
-    decayA: Number(s.decayA ?? 3),
-    grindPower: Number(s.grindPower ?? 0.5)
+    maximumPoints: Number(s.maximumPoints ?? s.maxPoints ?? 100),
+    rankDecayFactor: Number(s.rankDecayFactor ?? s.decayA ?? 3),
+    repeatPenaltyPower: Number(s.repeatPenaltyPower ?? s.grindPower ?? 0.5)
   };
 }
 
-function calcPoints(rank, quantity, k, cfg){
-  if(!quantity || quantity < 2) quantity = 2;
-  if(rank < 1) rank = 1;
-  if(rank > quantity) rank = quantity;
-  const x = (rank - 1) / (quantity - 1);
-  const base = cfg.maxPoints * Math.exp(-cfg.decayA * x);
-  const anti = 1 / Math.pow(Math.max(1, k), cfg.grindPower);
-  return Math.round(base * anti * 100) / 100;
+function calculateCompletionPoints(listRank, listSize, approvedCompletionsCount, scoringSettings){
+  let normalizedListSize = listSize;
+  if(!normalizedListSize || normalizedListSize < 2) normalizedListSize = 2;
+
+  let normalizedRank = listRank;
+  if(normalizedRank < 1) normalizedRank = 1;
+  if(normalizedRank > normalizedListSize) normalizedRank = normalizedListSize;
+
+  const normalizedPosition = (normalizedRank - 1) / (normalizedListSize - 1);
+  const positionScore = scoringSettings.maximumPoints * Math.exp(-scoringSettings.rankDecayFactor * normalizedPosition);
+  const antiGrindMultiplier = 1 / Math.pow(Math.max(1, approvedCompletionsCount), scoringSettings.repeatPenaltyPower);
+  return Math.round(positionScore * antiGrindMultiplier * 100) / 100;
 }
 
 async function loadPendingLevels(me){
@@ -167,7 +171,7 @@ async function loadPendingCompletions(me){
       userComps.forEach(x=>{ if(x.data().status==='approved') approvedCount++; });
       const k = approvedCount + 1;
 
-      const earned = calcPoints(rank, quantity, k, scoreCfg);
+      const earned = calculateCompletionPoints(rank, quantity, k, scoreCfg);
       const newPoints = Number(u.points ?? 0) + earned;
 
       await updateDoc(userRef, { points:newPoints });
