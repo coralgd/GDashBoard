@@ -5,153 +5,166 @@
 <title>Старший модератор</title>
 <link rel="stylesheet" href="hud.css">
 <style>
-  .row {
-    display: grid;
-    grid-template-columns: 2fr 1fr 1fr 1fr 1fr;
-    align-items: center;
-    gap: 10px; /* Расстояние между кнопками */
-    margin-bottom: 8px;
-    padding: 6px;
-    background: rgba(0, 0, 50, 0.4);
-    border-radius: 8px;
-    box-shadow: 0 0 8px rgba(0,0,0,0.5);
-  }
-
-  .row div, .row input, .row button {
-    font-family: 'Orbitron', sans-serif;
-    color: #00ffff;
-  }
-
-  .row input {
-    width: 60px;
-    text-align: center;
-    border-radius: 4px;
-    border: 1px solid #00ffff;
-    background: rgba(0,0,0,0.5);
-    color: #00ffff;
-  }
-
-  .row button {
-    padding: 4px 8px;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    font-weight: bold;
-    color: #fff;
-    transition: 0.2s;
-  }
-
-  .points-btn {
-    background: #0088ff;
-    box-shadow: 0 0 12px #0088ff;
-  }
-  .role-btn.active {
-    background: #ff4d4d;
-    box-shadow: 0 0 12px #ff4d4d;
-  }
-  .role-btn.inactive {
-    background: #0088ff;
-    box-shadow: 0 0 12px #0088ff;
-  }
-  .ver-btn.active {
-    background: #ff4d4d;
-    box-shadow: 0 0 12px #ff4d4d;
-  }
-  .ver-btn.inactive {
-    background: #0088ff;
-    box-shadow: 0 0 12px #0088ff;
-  }
+  .tabs button{margin-right:8px}
+  .panel{display:none;margin-top:14px}
+  .panel.active{display:block}
+  .row{border:1px solid #2d8cff55;background:rgba(0,20,50,.35);padding:10px;border-radius:8px;margin-bottom:10px}
+  .row input,.row textarea{width:100%;margin:6px 0}
+  .small{font-size:12px;opacity:.85}
 </style>
 </head>
 <body>
 <div class="hud" style="max-width:1100px;margin:40px auto;">
   <h1>Панель старшего модератора</h1>
-  <div id="list"></div>
+  <p id="status" style="color:#00ffff;">Загрузка...</p>
+
+  <div class="tabs">
+    <button data-tab="users">Пользователи</button>
+    <button data-tab="settings">Параметры очков</button>
+    <button data-tab="appeals">Апелляции</button>
+  </div>
+
+  <div id="users" class="panel active"></div>
+  <div id="settings" class="panel">
+    <div class="row">
+      <b>Настройка формулы очков</b>
+      <input id="sMax" type="number" step="1" min="1" placeholder="maxPoints (например 100)">
+      <input id="sA" type="number" step="0.1" min="0" placeholder="decayA (например 3)">
+      <input id="sGrind" type="number" step="0.01" min="0" placeholder="grindPower (например 0.5)">
+      <p class="small">Формула: points = maxPoints * e^(-decayA*x) * 1/(k^grindPower), x=(rank-1)/(quantity-1)</p>
+      <button id="saveSettings">Сохранить параметры</button>
+      <p id="settingsMsg" class="small"></p>
+    </div>
+  </div>
+  <div id="appeals" class="panel"></div>
 </div>
 
 <script type="module">
 import { auth, db } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import { collection, query, orderBy, getDocs, doc, updateDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+import {
+  collection, query, orderBy, getDocs, doc, updateDoc, getDoc,
+  serverTimestamp, setDoc, where
+} from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+
+const statusEl = document.getElementById('status');
+function setTab(id){
+  document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
+
+async function loadUsers(){
+  const box = document.getElementById('users');
+  box.innerHTML = 'Загрузка пользователей...';
+  const snap = await getDocs(query(collection(db,'users'), orderBy('points','desc')));
+  if(snap.empty){ box.innerHTML='<p>Нет пользователей.</p>'; return; }
+
+  box.innerHTML='';
+  snap.forEach(d=>{
+    const u = d.data();
+    const row = document.createElement('div');
+    row.className='row';
+    row.innerHTML = `
+      <b>${u.nick ?? 'Без ника'}</b> · роль: ${u.role ?? 'player'} · вериф: ${u.situation ?? 'not requested'}<br>
+      <input type="number" value="${u.points ?? 0}" class="points">
+      <button class="savePoints">Сохранить баллы</button>
+      <button class="toggleRole">${u.role==='moderator'?'Снять модерку':'Назначить модером'}</button>
+      <button class="toggleVer">${u.situation==='verified'?'Снять верификацию':'Верифицировать'}</button>
+    `;
+    box.appendChild(row);
+
+    row.querySelector('.savePoints').onclick = async ()=>{
+      await updateDoc(doc(db,'users',d.id), { points:Number(row.querySelector('.points').value) });
+    };
+    row.querySelector('.toggleRole').onclick = async ()=>{
+      const newRole = u.role==='moderator' ? 'player' : 'moderator';
+      await updateDoc(doc(db,'users',d.id), { role:newRole });
+      u.role = newRole;
+      row.querySelector('.toggleRole').textContent = u.role==='moderator'?'Снять модерку':'Назначить модером';
+    };
+    row.querySelector('.toggleVer').onclick = async ()=>{
+      const newSit = u.situation==='verified' ? 'not requested' : 'verified';
+      await updateDoc(doc(db,'users',d.id), { situation:newSit });
+      u.situation = newSit;
+      row.querySelector('.toggleVer').textContent = u.situation==='verified'?'Снять верификацию':'Верифицировать';
+    };
+  });
+}
+
+async function loadSettings(){
+  const snap = await getDoc(doc(db,'settings','scoring'));
+  const s = snap.exists() ? snap.data() : {};
+  document.getElementById('sMax').value = s.maxPoints ?? 100;
+  document.getElementById('sA').value = s.decayA ?? 3;
+  document.getElementById('sGrind').value = s.grindPower ?? 0.5;
+}
+
+async function loadAppeals(elderUid){
+  const box = document.getElementById('appeals');
+  box.innerHTML = 'Загрузка апелляций...';
+  const snap = await getDocs(query(collection(db,'appeals'), where('status','==','pending')));
+  if(snap.empty){ box.innerHTML='<p>Нет апелляций.</p>'; return; }
+  box.innerHTML='';
+
+  snap.forEach(d=>{
+    const a = d.data();
+    const row = document.createElement('div');
+    row.className='row';
+    row.innerHTML = `
+      <b>${a.nick ?? 'Без ника'}</b><br>
+      <p>${a.text ?? ''}</p>
+      <p class="small">Ссылка: ${a.link || '—'} | Файл: ${a.fileUrl || '—'}</p>
+      <input class="note" placeholder="Ответ старшего модератора">
+      <button class="approve">Удовлетворить</button>
+      <button class="reject">Отклонить</button>
+    `;
+    box.appendChild(row);
+
+    row.querySelector('.approve').onclick = async ()=>{
+      const note = row.querySelector('.note').value.trim() || 'Апелляция удовлетворена';
+      await updateDoc(doc(db,'appeals',d.id), {
+        status:'approved', note, reviewedBy:elderUid, reviewedAt:serverTimestamp()
+      });
+      row.remove();
+    };
+    row.querySelector('.reject').onclick = async ()=>{
+      const note = row.querySelector('.note').value.trim() || 'Апелляция отклонена';
+      await updateDoc(doc(db,'appeals',d.id), {
+        status:'rejected', note, reviewedBy:elderUid, reviewedAt:serverTimestamp()
+      });
+      row.remove();
+    };
+  });
+}
 
 onAuthStateChanged(auth, async user=>{
   if(!user) return location.href='index.html';
-  const meSnap = await getDoc(doc(db,'users',user.uid));
-  const me = meSnap.data();
-  if(me.role!=='elder') return location.href='main.html';
 
-  const q = query(collection(db,'users'), orderBy('points','desc'));
-  const snap = await getDocs(q);
+  try {
+    const meSnap = await getDoc(doc(db,'users',user.uid));
+    const me = meSnap.exists() ? meSnap.data() : null;
+    if(!me || me.situation!=='verified') return location.href='nick.html';
+    if(me.role!=='elder') return location.href='main.html';
 
-  snap.forEach(d=>{
-    const u = d.data();
+    await Promise.all([loadUsers(), loadSettings(), loadAppeals(user.uid)]);
+    statusEl.textContent = '';
 
-    const row = document.createElement('div');
-    row.className='row';
-
-    const nickDiv = document.createElement('div');
-    nickDiv.textContent = u.nick + (u.role==='elder'? ' [Старший]':'') + (u.role==='moderator'? ' [Модер]':'');
-
-    const input = document.createElement('input');
-    input.type='number';
-    input.value = u.points;
-
-    const pointsBtn = document.createElement('button');
-    pointsBtn.textContent='Баллы';
-    pointsBtn.className='points-btn';
-    pointsBtn.onclick=async()=>{ 
-      await updateDoc(doc(db,'users',d.id),{ points:Number(input.value) });
+    document.getElementById('saveSettings').onclick = async ()=>{
+      const maxPoints = Number(document.getElementById('sMax').value);
+      const decayA = Number(document.getElementById('sA').value);
+      const grindPower = Number(document.getElementById('sGrind').value);
+      const msg = document.getElementById('settingsMsg');
+      await setDoc(doc(db,'settings','scoring'), {
+        maxPoints, decayA, grindPower, updatedBy:user.uid, updatedAt:serverTimestamp()
+      }, { merge:true });
+      msg.textContent = 'Параметры сохранены.';
     };
-
-    const roleBtn = document.createElement('button');
-    const verBtn = document.createElement('button');
-
-    const setRoleBtn=()=>{
-      if(u.role==='moderator'){
-        roleBtn.textContent='Снять модерку';
-        roleBtn.className='role-btn active';
-      } else {
-        roleBtn.textContent='Назначить модером';
-        roleBtn.className='role-btn inactive';
-      }
-    };
-
-    const setVerBtn=()=>{
-      if(u.situation==='verified'){
-        verBtn.textContent='Снять верификацию';
-        verBtn.className='ver-btn active';
-      } else {
-        verBtn.textContent='Верифицировать';
-        verBtn.className='ver-btn inactive';
-      }
-    };
-
-    setRoleBtn();
-    setVerBtn();
-
-    roleBtn.onclick=async()=>{
-      const newRole = u.role==='moderator'?'player':'moderator';
-      await updateDoc(doc(db,'users',d.id),{ role:newRole });
-      u.role=newRole;
-      setRoleBtn();
-    };
-    verBtn.onclick=async()=>{
-      const newSit = u.situation==='verified'?'not requested':'verified';
-      await updateDoc(doc(db,'users',d.id),{ situation:newSit });
-      u.situation=newSit;
-      setVerBtn();
-    };
-
-    row.appendChild(nickDiv);
-    row.appendChild(input);
-    row.appendChild(pointsBtn);
-    row.appendChild(roleBtn);
-    row.appendChild(verBtn);
-
-    document.getElementById('list').appendChild(row);
-  });
+  } catch (e) {
+    console.error(e);
+    statusEl.textContent = 'Не удалось загрузить панель старшего модератора.';
+  }
 });
 </script>
 </body>
 </html>
-
