@@ -6,15 +6,28 @@
 <link rel="stylesheet" href="hud.css">
 </head>
 <body>
-<div class="hud" style="max-width:600px;margin:60px auto;text-align:center;">
+<div class="hud" style="max-width:800px;margin:50px auto;text-align:center;">
   <h1>Главная страница</h1>
+  <p id="status" style="color:#00ffff;">Загрузка профиля...</p>
   <p id="userInfo"></p>
   <p id="userPoints"></p>
   <p id="userPlace"></p>
 
-  <button id="leaderboardBtn" style="margin-top:20px;">Лидерборд</button>
-  <button id="check" style="margin-top:20px;">Проверить</button>
-  <p id="err" style="color:red;margin-top:10px;"></p>
+  <div class="top-actions" style="justify-content:center;">
+    <button id="leaderboardBtn">Лидерборд и лист</button>
+    <button id="openLevelsMenu">Меню уровней</button>
+    <button id="check">Модерация</button>
+  </div>
+  <div id="levelsMenu" class="menu-panel">
+    <div class="menu-grid">
+      <button id="goSubmitLevel">Отправить уровень</button>
+      <button id="goSubmitCompletion">Отправить прохождение</button>
+      <button id="goSubmitAppeal">Отправить апелляцию</button>
+      <button id="goMySubmissions">Мои отправки</button>
+    </div>
+  </div>
+
+  <p id="err" style="color:red;margin-top:12px;"></p>
 </div>
 
 <script type="module">
@@ -22,54 +35,54 @@ import { auth, db } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
 import { doc, getDoc, collection, getDocs, query, orderBy } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
+const statusEl = document.getElementById('status');
 const info = document.getElementById('userInfo');
 const pointsEl = document.getElementById('userPoints');
 const placeEl = document.getElementById('userPlace');
 const err = document.getElementById('err');
-const btn = document.getElementById('check');
-const leaderboardBtn = document.getElementById('leaderboardBtn');
 
 onAuthStateChanged(auth, async user => {
   if(!user) return location.href='index.html';
 
-  const userRef = doc(db,'users',user.uid);
-  const userSnap = await getDoc(userRef);
-  const u = userSnap.data();
+  try {
+    const userSnap = await getDoc(doc(db,'users',user.uid));
+    const profile = userSnap.exists() ? userSnap.data() : null;
+    if(!profile || profile.situation !== 'verified') return location.href='nick.html';
 
-  if(!u || u.situation !== 'verified') return location.href='nick.html';
+    statusEl.textContent = '';
+    info.textContent = `Ник: ${profile.nick ?? '—'}`;
+    pointsEl.textContent = `Баллы: ${profile.points ?? 0}`;
 
-  info.textContent = `Ник: ${u.nick}`;
-  pointsEl.textContent = `Баллы: ${u.points}`;
+    const usersSnap = await getDocs(query(collection(db,'users'), orderBy('points','desc')));
+    let place = 0, rank = 0, last = null;
+    usersSnap.forEach(d=>{
+      const u = d.data();
+      if(u.situation!=='verified') return;
+      rank++;
+      if(u.points !== last){ place = rank; last = u.points; }
+      if(d.id===user.uid) placeEl.textContent = `Место: ${place}`;
+    });
+    if(!placeEl.textContent) placeEl.textContent='Место: —';
 
-  // Вычисляем место пользователя
-  const q = query(collection(db,'users'), orderBy('points','desc'));
-  const snap = await getDocs(q);
+    document.getElementById('leaderboardBtn').onclick = ()=> location.href='leaderboard.html';
+    document.getElementById('openLevelsMenu').onclick = ()=>{
+      document.getElementById('levelsMenu').classList.toggle('open');
+    };
+    document.getElementById('check').onclick = ()=>{
+      if(profile.role==='moderator') location.href='moderator.html';
+      else if(profile.role==='elder') location.href='elder.html';
+      else err.textContent='Доступно только модераторам';
+    };
 
-  let place = 0;
-  let lastPoints = null;
-  let rank = 0;
+    document.getElementById('goSubmitLevel').onclick = ()=> location.href='submit-level.html';
+    document.getElementById('goSubmitCompletion').onclick = ()=> location.href='submit-completion.html';
+    document.getElementById('goSubmitAppeal').onclick = ()=> location.href='submit-appeal.html';
+    document.getElementById('goMySubmissions').onclick = ()=> location.href='my-submissions.html';
 
-  snap.forEach(docSnap => {
-    const data = docSnap.data();
-    rank++;
-    if(data.points !== lastPoints){
-      place = rank;
-      lastPoints = data.points;
-    }
-    if(docSnap.id === user.uid){
-      placeEl.textContent = `Место: ${place}`;
-    }
-  });
-
-  // Кнопка перехода на лидерборд
-  leaderboardBtn.onclick = () => location.href='leaderboard.html';
-
-  // Кнопка "Проверить" для модеров
-  btn.onclick = () => {
-    if(u.role==='moderator') location.href='moderator.html';
-    else if(u.role==='elder') location.href='elder.html';
-    else err.textContent = 'Ошибка: модерки нет';
-  };
+  } catch (e) {
+    console.error(e);
+    statusEl.textContent = 'Не удалось загрузить профиль.';
+  }
 });
 </script>
 </body>

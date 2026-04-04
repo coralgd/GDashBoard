@@ -4,36 +4,88 @@
 <meta charset="UTF-8">
 <title>Leaderboard</title>
 <link rel="stylesheet" href="hud.css">
+<style>
+  .tabs button{margin-right:8px}
+  .panel{display:none}
+  .panel.active{display:block}
+  .item{border:1px solid #2d8cff55;background:rgba(0,20,50,.35);padding:8px;border-radius:8px;margin-bottom:8px}
+</style>
 </head>
 <body>
 
-<div class="hud" style="max-width:900px;margin:40px auto;">
+<div class="hud" style="max-width:1000px;margin:40px auto;">
 <h1>Лидерборд</h1>
-<div id="list"></div>
+<p id="status" style="margin:8px 0 14px;color:#00ffff;">Загрузка...</p>
+<div class="tabs">
+  <button data-tab="players">Игроки</button>
+  <button data-tab="levels">Лист уровней</button>
+</div>
+<div id="players" class="panel active"><div id="playersList"></div></div>
+<div id="levels" class="panel"><div id="levelsList"></div></div>
 </div>
 
 <script type="module">
 import { auth, db } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import { collection, query, where, orderBy, getDocs } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+import { collection, query, orderBy, getDocs, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+
+const statusEl = document.getElementById('status');
+const playersList = document.getElementById('playersList');
+const levelsList = document.getElementById('levelsList');
+
+function setTab(id){
+  document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
 
 onAuthStateChanged(auth, async u=>{
  if(!u) return location.href='index.html';
 
- const q=query(collection(db,'users'),where('situation','==','verified'),orderBy('points','desc'));
- const snap=await getDocs(q);
- let r=0,p=0,last=null;
- snap.forEach(d=>{
-   const u2=d.data(); r++;
-   if(u2.points!==last){p=r;last=u2.points;}
-   const row=document.createElement('div');
-   row.className='row';
-   if(d.id===u.uid) row.classList.add('me');
-   if(u2.role==='moderator') row.classList.add('moderator');
-   if(u2.role==='elder') row.classList.add('elder');
-   row.innerHTML=`<div>${p}</div><div>${u2.nick}</div><div>${u2.points}</div>`;
-   list.appendChild(row);
- });
+ try {
+  const meSnap = await getDoc(doc(db,'users',u.uid));
+  const me = meSnap.exists() ? meSnap.data() : null;
+  if(!me || me.situation!=='verified') return location.href='nick.html';
+
+  const usersSnap = await getDocs(query(collection(db,'users'),orderBy('points','desc')));
+  let r=0,p=0,last=null;
+  usersSnap.forEach(d=>{
+    const u2=d.data();
+    if(u2.situation!=='verified') return;
+    r++;
+    if(u2.points!==last){p=r;last=u2.points;}
+    const row=document.createElement('div');
+    row.className='row';
+    if(d.id===u.uid) row.classList.add('me');
+    if(u2.role==='moderator') row.classList.add('moderator');
+    if(u2.role==='elder') row.classList.add('elder');
+    row.innerHTML=`<div>${p}</div><div>${u2.nick ?? 'Без ника'}</div><div>${u2.points ?? 0}</div>`;
+    playersList.appendChild(row);
+  });
+
+  const levelsSnap = await getDocs(query(collection(db,'levels'), orderBy('rank','asc')));
+  if(levelsSnap.empty){
+    levelsList.innerHTML = '<p>Лист уровней пока пуст.</p>';
+  } else {
+    levelsSnap.forEach(d=>{
+      const lv = d.data();
+      if(lv.status==='archived') return;
+      const item = document.createElement('div');
+      item.className='item';
+      item.innerHTML = `<b>#${lv.rank ?? '—'}</b> · <a target="_blank" href="${lv.link}">Открыть уровень</a><br>${lv.text ?? ''}<br><span style="font-size:12px;opacity:.85">Файл: ${lv.fileUrl || '—'}</span>`;
+      levelsList.appendChild(item);
+    });
+  }
+
+  if(!playersList.childElementCount){
+    statusEl.textContent='Пока нет верифицированных участников.';
+  } else {
+    statusEl.textContent='';
+  }
+ } catch (e) {
+  console.error(e);
+  statusEl.textContent='Не удалось загрузить данные. Попробуйте позже.';
+ }
 });
 </script>
 </body>
