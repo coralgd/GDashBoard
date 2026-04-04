@@ -7,7 +7,9 @@
 </head>
 <body>
 <div class="hud" style="max-width:800px;margin:50px auto;text-align:center;">
-  <h1>Главная страница</h1>
+  <div class="page-header" style="justify-content:center;">
+    <h1 style="margin:0;">Главная страница</h1>
+  </div>
   <p id="status" style="color:#00ffff;">Загрузка профиля...</p>
   <p id="userInfo"></p>
   <p id="userPoints"></p>
@@ -20,6 +22,7 @@
   </div>
 
   <p id="err" style="color:red;margin-top:12px;"></p>
+  <p id="version" class="small" style="margin-top:22px;opacity:.72;"></p>
 </div>
 
 <script type="module">
@@ -32,6 +35,9 @@ const info = document.getElementById('userInfo');
 const pointsEl = document.getElementById('userPoints');
 const placeEl = document.getElementById('userPlace');
 const err = document.getElementById('err');
+const versionEl = document.getElementById('version');
+const APP_VERSION = 'save full - 001 · v2026.04.04';
+versionEl.textContent = `Версия: ${APP_VERSION}`;
 
 onAuthStateChanged(auth, async user => {
   if(!user) return location.href='index.html';
@@ -57,11 +63,11 @@ onAuthStateChanged(auth, async user => {
     if(!placeEl.textContent) placeEl.textContent='Место: —';
 
     document.getElementById('leaderboardBtn').onclick = ()=> location.href='leaderboard.html';
-    document.getElementById('openLevelsMenu').onclick = ()=> location.href='levels-menu.html';
+    document.getElementById('openLevelsMenu').onclick = ()=> location.href='leaderboard.html#menu';
     document.getElementById('check').onclick = ()=>{
       if(profile.role==='moderator') location.href='moderator.html';
       else if(profile.role==='elder') location.href='elder.html';
-      else err.textContent='Доступно только модераторам';
+      else err.textContent='Доступно только модерторам';
     };
 
   } catch (e) {
