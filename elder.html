@@ -22,6 +22,9 @@
     <button data-tab="users">Пользователи</button>
     <button data-tab="settings">Параметры очков</button>
     <button data-tab="appeals">Апелляции</button>
+    <button data-tab="levelSubmissions">Заявки уровней</button>
+    <button data-tab="completionSubmissions">Заявки прохождений</button>
+    <button data-tab="manualLevel">Поставить уровень</button>
   </div>
 
   <div id="users" class="panel active"></div>
@@ -37,6 +40,19 @@
     </div>
   </div>
   <div id="appeals" class="panel"></div>
+  <div id="levelSubmissions" class="panel"></div>
+  <div id="completionSubmissions" class="panel"></div>
+  <div id="manualLevel" class="panel">
+    <div class="row">
+      <b>Ручное добавление уровня в лист</b>
+      <input id="mLink" placeholder="Ссылка на уровень">
+      <textarea id="mText" placeholder="Описание"></textarea>
+      <input id="mFile" placeholder="Ссылка на файл (опционально)">
+      <input id="mRank" type="number" min="1" placeholder="Место в листе">
+      <button id="mAdd">Добавить в лист</button>
+      <p id="mMsg" class="small"></p>
+    </div>
+  </div>
 </div>
 
 <script type="module">
@@ -44,7 +60,7 @@ import { auth, db } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
 import {
   collection, query, orderBy, getDocs, doc, updateDoc, getDoc,
-  serverTimestamp, setDoc, where
+  serverTimestamp, setDoc, where, addDoc
 } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
 const statusEl = document.getElementById('status');
@@ -53,6 +69,30 @@ function setTab(id){
   document.getElementById(id).classList.add('active');
 }
 document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
+
+async function getScoring(){
+  const snap = await getDoc(doc(db,'settings','scoring'));
+  const s = snap.exists() ? snap.data() : {};
+  return {
+    maximumPoints: Number(s.maximumPoints ?? s.maxPoints ?? 100),
+    rankDecayFactor: Number(s.rankDecayFactor ?? s.decayA ?? 3),
+    repeatPenaltyPower: Number(s.repeatPenaltyPower ?? s.grindPower ?? 0.5)
+  };
+}
+
+function calculateCompletionPoints(listRank, listSize, approvedCompletionsCount, scoringSettings){
+  let normalizedListSize = listSize;
+  if(!normalizedListSize || normalizedListSize < 2) normalizedListSize = 2;
+
+  let normalizedRank = listRank;
+  if(normalizedRank < 1) normalizedRank = 1;
+  if(normalizedRank > normalizedListSize) normalizedRank = normalizedListSize;
+
+  const normalizedPosition = (normalizedRank - 1) / (normalizedListSize - 1);
+  const positionScore = scoringSettings.maximumPoints * Math.exp(-scoringSettings.rankDecayFactor * normalizedPosition);
+  const antiGrindMultiplier = 1 / Math.pow(Math.max(1, approvedCompletionsCount), scoringSettings.repeatPenaltyPower);
+  return Math.round(positionScore * antiGrindMultiplier * 100) / 100;
+}
 
 async function loadUsers(){
   const box = document.getElementById('users');
@@ -74,20 +114,30 @@ async function loadUsers(){
     `;
     box.appendChild(row);
 
+    const roleBtn = row.querySelector('.toggleRole');
+    const verBtn = row.querySelector('.toggleVer');
+    const paintButtons = ()=>{
+      roleBtn.className = `toggleRole ${u.role==='moderator'?'btn-danger':''}`.trim();
+      verBtn.className = `toggleVer ${u.situation==='verified'?'btn-danger':''}`.trim();
+    };
+    paintButtons();
+
     row.querySelector('.savePoints').onclick = async ()=>{
       await updateDoc(doc(db,'users',d.id), { points:Number(row.querySelector('.points').value) });
     };
-    row.querySelector('.toggleRole').onclick = async ()=>{
+    roleBtn.onclick = async ()=>{
       const newRole = u.role==='moderator' ? 'player' : 'moderator';
       await updateDoc(doc(db,'users',d.id), { role:newRole });
       u.role = newRole;
-      row.querySelector('.toggleRole').textContent = u.role==='moderator'?'Снять модерку':'Назначить модером';
+      roleBtn.textContent = u.role==='moderator'?'Снять модерку':'Назначить модером';
+      paintButtons();
     };
-    row.querySelector('.toggleVer').onclick = async ()=>{
+    verBtn.onclick = async ()=>{
       const newSit = u.situation==='verified' ? 'not requested' : 'verified';
       await updateDoc(doc(db,'users',d.id), { situation:newSit });
       u.situation = newSit;
-      row.querySelector('.toggleVer').textContent = u.situation==='verified'?'Снять верификацию':'Верифицировать';
+      verBtn.textContent = u.situation==='verified'?'Снять верификацию':'Верифицировать';
+      paintButtons();
     };
   });
 }
@@ -138,6 +188,121 @@ async function loadAppeals(elderUid){
   });
 }
 
+async function loadLevelSubmissions(elder){
+  const box = document.getElementById('levelSubmissions');
+  box.innerHTML = 'Загрузка заявок уровней...';
+  const snap = await getDocs(query(collection(db,'level_submissions'), where('status','==','pending')));
+  if(snap.empty){ box.innerHTML='<p>Нет заявок.</p>'; return; }
+  box.innerHTML = '';
+
+  snap.forEach(d=>{
+    const s = d.data();
+    const row = document.createElement('div');
+    row.className='row';
+    row.innerHTML = `
+      <b>${s.nick ?? 'Без ника'}</b><br>
+      <a href="${s.link}" target="_blank">Ссылка</a>
+      <p>${s.text ?? ''}</p>
+      <p class="small">Файл: ${s.fileUrl || '—'}</p>
+      <input placeholder="Комментарий" class="note">
+      <input type="number" min="1" placeholder="Место в листе" class="rank">
+      <div class="top-actions">
+        <button class="approve">Одобрить и поставить в лист</button>
+        <button class="reject btn-danger">Отклонить</button>
+      </div>
+    `;
+    box.appendChild(row);
+
+    row.querySelector('.approve').onclick = async ()=>{
+      const note = row.querySelector('.note').value.trim();
+      const rank = Number(row.querySelector('.rank').value);
+      if(!rank){ alert('Укажи место'); return; }
+      await addDoc(collection(db,'levels'), {
+        link:s.link, text:s.text ?? '', fileUrl:s.fileUrl ?? '', rank,
+        addedBy:elder.uid, addedByNick:elder.nick ?? 'elder', createdAt:serverTimestamp(),
+        sourceSubmissionId:d.id, status:'active'
+      });
+      await updateDoc(doc(db,'level_submissions',d.id), {
+        status:'approved', note, reviewedBy:elder.uid, reviewedAt:serverTimestamp(), finalRank:rank
+      });
+      row.remove();
+    };
+
+    row.querySelector('.reject').onclick = async ()=>{
+      const note = row.querySelector('.note').value.trim() || 'Отклонено старшим модератором';
+      await updateDoc(doc(db,'level_submissions',d.id), {
+        status:'rejected', note, reviewedBy:elder.uid, reviewedAt:serverTimestamp()
+      });
+      row.remove();
+    };
+  });
+}
+
+async function loadCompletionSubmissions(elder){
+  const box = document.getElementById('completionSubmissions');
+  box.innerHTML = 'Загрузка заявок прохождений...';
+  const snap = await getDocs(query(collection(db,'completion_submissions'), where('status','==','pending')));
+  if(snap.empty){ box.innerHTML='<p>Нет заявок.</p>'; return; }
+
+  const levelsSnap = await getDocs(collection(db,'levels'));
+  const levels = [];
+  levelsSnap.forEach(d=>levels.push({id:d.id, ...d.data()}));
+  const quantity = Math.max(levels.length, 2);
+  const scoreCfg = await getScoring();
+  box.innerHTML = '';
+
+  snap.forEach(d=>{
+    const s = d.data();
+    const row = document.createElement('div');
+    row.className='row';
+    row.innerHTML = `
+      <b>${s.nick ?? 'Без ника'}</b><br>
+      <a href="${s.link}" target="_blank">Доказательство</a>
+      <p>${s.text ?? ''}</p>
+      <p class="small">Файл: ${s.fileUrl || '—'}</p>
+      <input type="number" min="1" max="${quantity}" placeholder="Место уровня в листе" class="rank">
+      <input placeholder="Комментарий" class="note">
+      <div class="top-actions">
+        <button class="approve">Подтвердить прохождение</button>
+        <button class="reject btn-danger">Отклонить</button>
+      </div>
+    `;
+    box.appendChild(row);
+
+    row.querySelector('.approve').onclick = async ()=>{
+      const note = row.querySelector('.note').value.trim();
+      const rank = Number(row.querySelector('.rank').value);
+      if(!rank){ alert('Укажи место уровня'); return; }
+
+      const userRef = doc(db,'users',s.playerId);
+      const userSnap = await getDoc(userRef);
+      const u = userSnap.exists() ? userSnap.data() : null;
+      if(!u){ alert('Игрок не найден'); return; }
+
+      const userComps = await getDocs(query(collection(db,'completion_submissions'), where('playerId','==',s.playerId)));
+      let approvedCount = 0;
+      userComps.forEach(x=>{ if(x.data().status==='approved') approvedCount++; });
+      const k = approvedCount + 1;
+      const earned = calculateCompletionPoints(rank, quantity, k, scoreCfg);
+
+      await updateDoc(userRef, { points:Number(u.points ?? 0) + earned });
+      await updateDoc(doc(db,'completion_submissions',d.id), {
+        status:'approved', note, reviewedBy:elder.uid, reviewedAt:serverTimestamp(),
+        awardedPoints:earned, listRank:rank, listQuantity:quantity, scoreK:k
+      });
+      row.remove();
+    };
+
+    row.querySelector('.reject').onclick = async ()=>{
+      const note = row.querySelector('.note').value.trim() || 'Отклонено старшим модератором';
+      await updateDoc(doc(db,'completion_submissions',d.id), {
+        status:'rejected', note, reviewedBy:elder.uid, reviewedAt:serverTimestamp()
+      });
+      row.remove();
+    };
+  });
+}
+
 onAuthStateChanged(auth, async user=>{
   if(!user) return location.href='index.html';
 
@@ -147,7 +312,13 @@ onAuthStateChanged(auth, async user=>{
     if(!me || me.situation!=='verified') return location.href='nick.html';
     if(me.role!=='elder') return location.href='main.html';
 
-    await Promise.all([loadUsers(), loadSettings(), loadAppeals(user.uid)]);
+    await Promise.all([
+      loadUsers(),
+      loadSettings(),
+      loadAppeals(user.uid),
+      loadLevelSubmissions({uid:user.uid, nick:me.nick}),
+      loadCompletionSubmissions({uid:user.uid, nick:me.nick})
+    ]);
     statusEl.textContent = '';
 
     document.getElementById('saveSettings').onclick = async ()=>{
@@ -162,6 +333,21 @@ onAuthStateChanged(auth, async user=>{
         updatedBy:user.uid, updatedAt:serverTimestamp()
       }, { merge:true });
       msg.textContent = 'Параметры сохранены.';
+    };
+
+    document.getElementById('mAdd').onclick = async ()=>{
+      const link = document.getElementById('mLink').value.trim();
+      const text = document.getElementById('mText').value.trim();
+      const fileUrl = document.getElementById('mFile').value.trim();
+      const rank = Number(document.getElementById('mRank').value);
+      const msg = document.getElementById('mMsg');
+      if(!link || !text || !rank){ msg.textContent='Нужны ссылка, текст и место'; return; }
+      await addDoc(collection(db,'levels'), {
+        link, text, fileUrl, rank,
+        addedBy:user.uid, addedByNick:me.nick ?? 'elder', createdAt:serverTimestamp(),
+        status:'active', sourceSubmissionId:null
+      });
+      msg.textContent = 'Уровень добавлен в лист.';
     };
   } catch (e) {
     console.error(e);

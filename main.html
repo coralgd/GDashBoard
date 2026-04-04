@@ -15,26 +15,11 @@
 
   <div class="top-actions" style="justify-content:center;">
     <button id="leaderboardBtn" class="btn-hero">Лидерборд и лист</button>
-    <button id="openLevelsMenu" class="btn-hero">Открыть меню уровней</button>
+    <button id="openLevelsMenu" class="btn-hero">Меню уровней</button>
     <button id="check" class="btn-hero">Модерация</button>
   </div>
 
   <p id="err" style="color:red;margin-top:12px;"></p>
-</div>
-
-<div id="levelsDialog" class="dialog-backdrop">
-  <div class="dialog">
-    <h2 style="margin-top:0">Меню уровней</h2>
-    <div class="menu-grid">
-      <button id="goSubmitLevel">Отправить уровень</button>
-      <button id="goSubmitCompletion">Отправить прохождение</button>
-      <button id="goSubmitAppeal">Отправить апелляцию</button>
-      <button id="goMySubmissions">Мои отправки</button>
-    </div>
-    <div class="top-actions">
-      <button id="closeLevelsDialog" class="btn-ghost">Закрыть</button>
-    </div>
-  </div>
 </div>
 
 <script type="module">
@@ -72,25 +57,12 @@ onAuthStateChanged(auth, async user => {
     if(!placeEl.textContent) placeEl.textContent='Место: —';
 
     document.getElementById('leaderboardBtn').onclick = ()=> location.href='leaderboard.html';
-    document.getElementById('openLevelsMenu').onclick = ()=>{
-      document.getElementById('levelsDialog').classList.add('open');
-    };
-    document.getElementById('closeLevelsDialog').onclick = ()=>{
-      document.getElementById('levelsDialog').classList.remove('open');
-    };
-    document.getElementById('levelsDialog').onclick = (e)=>{
-      if(e.target.id === 'levelsDialog') e.currentTarget.classList.remove('open');
-    };
+    document.getElementById('openLevelsMenu').onclick = ()=> location.href='levels-menu.html';
     document.getElementById('check').onclick = ()=>{
       if(profile.role==='moderator') location.href='moderator.html';
       else if(profile.role==='elder') location.href='elder.html';
       else err.textContent='Доступно только модераторам';
     };
-
-    document.getElementById('goSubmitLevel').onclick = ()=> location.href='submit-level.html';
-    document.getElementById('goSubmitCompletion').onclick = ()=> location.href='submit-completion.html';
-    document.getElementById('goSubmitAppeal').onclick = ()=> location.href='submit-appeal.html';
-    document.getElementById('goMySubmissions').onclick = ()=> location.href='my-submissions.html';
 
   } catch (e) {
     console.error(e);
