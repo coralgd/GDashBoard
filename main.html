@@ -4,9 +4,6 @@
 <meta charset="UTF-8">
 <title>Main</title>
 <link rel="stylesheet" href="hud.css">
-<style>
-  .actions { display:grid; grid-template-columns: 1fr 1fr; gap:12px; margin-top:20px; }
-</style>
 </head>
 <body>
 <div class="hud" style="max-width:800px;margin:50px auto;text-align:center;">
@@ -16,13 +13,18 @@
   <p id="userPoints"></p>
   <p id="userPlace"></p>
 
-  <div class="actions">
+  <div class="top-actions" style="justify-content:center;">
     <button id="leaderboardBtn">Лидерборд и лист</button>
+    <button id="openLevelsMenu">Меню уровней</button>
     <button id="check">Модерация</button>
-    <button id="goSubmitLevel">Отправить уровень</button>
-    <button id="goSubmitCompletion">Отправить прохождение</button>
-    <button id="goSubmitAppeal">Отправить апелляцию</button>
-    <button id="goMySubmissions">Мои отправки</button>
+  </div>
+  <div id="levelsMenu" class="menu-panel">
+    <div class="menu-grid">
+      <button id="goSubmitLevel">Отправить уровень</button>
+      <button id="goSubmitCompletion">Отправить прохождение</button>
+      <button id="goSubmitAppeal">Отправить апелляцию</button>
+      <button id="goMySubmissions">Мои отправки</button>
+    </div>
   </div>
 
   <p id="err" style="color:red;margin-top:12px;"></p>
@@ -63,6 +65,9 @@ onAuthStateChanged(auth, async user => {
     if(!placeEl.textContent) placeEl.textContent='Место: —';
 
     document.getElementById('leaderboardBtn').onclick = ()=> location.href='leaderboard.html';
+    document.getElementById('openLevelsMenu').onclick = ()=>{
+      document.getElementById('levelsMenu').classList.toggle('open');
+    };
     document.getElementById('check').onclick = ()=>{
       if(profile.role==='moderator') location.href='moderator.html';
       else if(profile.role==='elder') location.href='elder.html';

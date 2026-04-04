@@ -5,10 +5,9 @@
 <title>Moderator Panel</title>
 <link rel="stylesheet" href="hud.css">
 <style>
-  .tabs button{margin-right:8px}
   .panel{display:none;margin-top:14px}
   .panel.active{display:block}
-  .row{border:1px solid #2d8cff55;background:rgba(0,20,50,.35);padding:10px;border-radius:8px;margin-bottom:10px}
+  .row{border:1px solid #2d8cff55;background:rgba(0,20,50,.35);padding:12px;border-radius:10px;margin-bottom:12px}
   .row input,.row textarea{width:100%;margin:6px 0}
   .small{font-size:12px;opacity:.85}
 </style>
@@ -18,10 +17,15 @@
   <h1>Панель модератора</h1>
   <p id="status" style="color:#00ffff;">Загрузка...</p>
 
-  <div class="tabs">
-    <button data-tab="levels">Заявки уровней</button>
-    <button data-tab="completions">Заявки прохождений</button>
-    <button data-tab="manual">Поставить уровень в лист</button>
+  <div class="top-actions">
+    <button id="openLevelsModeratorMenu">Меню уровней</button>
+  </div>
+  <div id="levelsModeratorMenu" class="menu-panel open">
+    <div class="menu-grid">
+      <button data-tab="levels">Заявки уровней</button>
+      <button data-tab="completions">Заявки прохождений</button>
+      <button data-tab="manual">Поставить уровень в лист</button>
+    </div>
   </div>
 
   <div id="levels" class="panel active"></div>
@@ -52,7 +56,10 @@ function setTab(id){
   document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
   document.getElementById(id).classList.add('active');
 }
-document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
+document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
+document.getElementById('openLevelsModeratorMenu').onclick = ()=>{
+  document.getElementById('levelsModeratorMenu').classList.toggle('open');
+};
 
 async function getScoring(){
   const snap = await getDoc(doc(db,'settings','scoring'));
