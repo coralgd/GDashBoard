@@ -13,6 +13,7 @@
 <input id="password" type="password" placeholder="Password"><br><br>
 <button id="login">Войти</button>
 <button id="register">Регистрация</button>
+<p id="error" style="color:red;"></p>
 </div>
 
 <script type="module">
@@ -20,15 +21,32 @@ import { auth, db } from './firebase.js';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
 import { doc, setDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
-login.onclick=()=>signInWithEmailAndPassword(auth,email.value,password.value)
-.then(()=>location.href='nick.html');
+const errorEl = document.getElementById('error');
 
-register.onclick=()=>createUserWithEmailAndPassword(auth,email.value,password.value)
-.then(u=>setDoc(doc(db,'users',u.user.uid),{
-  role:'player',
-  points:0,
-  situation:'not requested'
-})).then(()=>location.href='nick.html');
+login.onclick=()=>{
+  errorEl.textContent = '';
+  signInWithEmailAndPassword(auth,email.value,password.value)
+    .then(()=>location.href='nick.html')
+    .catch((e)=>{
+      console.error(e);
+      errorEl.textContent = 'Ошибка входа. Проверьте email и пароль.';
+    });
+};
+
+register.onclick=()=>{
+  errorEl.textContent = '';
+  createUserWithEmailAndPassword(auth,email.value,password.value)
+    .then(u=>setDoc(doc(db,'users',u.user.uid),{
+      role:'player',
+      points:0,
+      situation:'not requested'
+    }))
+    .then(()=>location.href='nick.html')
+    .catch((e)=>{
+      console.error(e);
+      errorEl.textContent = 'Ошибка регистрации. Попробуйте позже.';
+    });
+};
 </script>
 </body>
 </html>

@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Отправка прохождения</title>
+<link rel="stylesheet" href="hud.css">
+</head>
+<body>
+<div class="hud" style="max-width:700px;margin:50px auto;">
+  <h1>Отправить прохождение</h1>
+  <input id="link" placeholder="Ссылка на доказательство"><br><br>
+  <textarea id="text" placeholder="Комментарий" style="width:100%;min-height:120px"></textarea><br><br>
+  <input id="fileUrl" placeholder="Ссылка на файл (опционально)"><br><br>
+  <button id="send">Отправить</button>
+  <button id="back">Назад</button>
+  <p id="msg" style="color:#00ffff"></p>
+</div>
+
+<script type="module">
+import { auth, db } from './firebase.js';
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
+import { doc, getDoc, addDoc, collection, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+
+let user = null;
+let profile = null;
+
+onAuthStateChanged(auth, async u=>{
+  if(!u) return location.href='index.html';
+  user = u;
+  const snap = await getDoc(doc(db,'users',u.uid));
+  profile = snap.exists() ? snap.data() : null;
+  if(!profile || profile.situation!=='verified') return location.href='nick.html';
+});
+
+send.onclick = async ()=>{
+  const link = document.getElementById('link').value.trim();
+  const text = document.getElementById('text').value.trim();
+  const fileUrl = document.getElementById('fileUrl').value.trim();
+  const msg = document.getElementById('msg');
+  if(!link || !text){ msg.textContent='Нужны ссылка и текст'; return; }
+
+  await addDoc(collection(db,'completion_submissions'), {
+    playerId:user.uid, nick:profile.nick ?? 'Без ника', link, text, fileUrl,
+    status:'pending', note:'', awardedPoints:0, createdAt:serverTimestamp()
+  });
+  msg.textContent='Прохождение отправлено модераторам.';
+};
+
+back.onclick = ()=> location.href='main.html';
+</script>
+</body>
+</html>
