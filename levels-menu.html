@@ -2,43 +2,24 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>Меню уровней</title>
+<title>Меню уровней (перенесено)</title>
 <link rel="stylesheet" href="hud.css">
 </head>
 <body>
 <div class="hud" style="max-width:760px;margin:50px auto;">
-  <h1>Меню уровней</h1>
-  <p id="status" style="color:#00ffff;">Проверка доступа...</p>
-
-  <div class="menu-grid" style="margin-top:14px;">
-    <button id="goSubmitLevel">Отправить уровень</button>
-    <button id="goSubmitCompletion">Отправить прохождение</button>
-    <button id="goSubmitAppeal">Отправить апелляцию</button>
-    <button id="goMySubmissions">Мои отправки</button>
-  </div>
-
-  <div class="top-actions">
+  <div class="page-header">
+    <h1 style="margin:0;">Меню уровней</h1>
     <button id="back" class="btn-ghost">Назад на главную</button>
   </div>
+  <p id="status" style="color:#00ffff;">Меню перенесено на страницу листа.</p>
+  <div class="top-actions">
+    <button id="goNewMenu" class="btn-hero">Открыть меню на странице листа</button>
+  </div>
+
 </div>
 
 <script type="module">
-import { auth, db } from './firebase.js';
-import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
-
-onAuthStateChanged(auth, async u=>{
-  if(!u) return location.href='index.html';
-  const snap = await getDoc(doc(db,'users',u.uid));
-  const me = snap.exists() ? snap.data() : null;
-  if(!me || me.situation!=='verified') return location.href='nick.html';
-  document.getElementById('status').textContent = '';
-});
-
-goSubmitLevel.onclick = ()=> location.href='submit-level.html';
-goSubmitCompletion.onclick = ()=> location.href='submit-completion.html';
-goSubmitAppeal.onclick = ()=> location.href='submit-appeal.html';
-goMySubmissions.onclick = ()=> location.href='my-submissions.html';
+document.getElementById('goNewMenu').onclick = ()=> location.href='leaderboard.html#menu';
 back.onclick = ()=> location.href='main.html';
 </script>
 </body>
