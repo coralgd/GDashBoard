@@ -69,6 +69,7 @@ const statLevels = document.getElementById('statLevels');
 let currentUid = null;
 let usersCache = [];
 let levelsCache = [];
+let scoringCfg = { maximumPoints:100, rankDecayFactor:3, repeatPenaltyPower:0.5 };
 
 function escapeHtml(value){
   return String(value ?? '').replace(/[&<>'"]/g, ch => ({ '&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;' }[ch]));
@@ -91,6 +92,25 @@ function setTab(id){
   document.getElementById(id).classList.add('active');
   document.querySelectorAll('.tabs button').forEach(btn=>btn.classList.toggle('active', btn.dataset.tab===id));
   history.replaceState(null, '', `#${id}`);
+}
+
+function calculateCompletionPoints(listRank, listSize, approvedCompletionsCount, scoringSettings){
+  const normalizedListSize = Math.max(2, Number(listSize || 2));
+  const normalizedRank = Math.max(1, Math.min(Number(listRank || 1), normalizedListSize));
+  const x = (normalizedRank - 1) / (normalizedListSize - 1);
+  const base = scoringSettings.maximumPoints * Math.exp(-scoringSettings.rankDecayFactor * x);
+  const antiGrind = 1 / Math.pow(Math.max(1, approvedCompletionsCount), scoringSettings.repeatPenaltyPower);
+  return Math.round(base * antiGrind * 100) / 100;
+}
+
+async function getScoring(){
+  const snap = await getDoc(doc(db,'settings','scoring'));
+  const s = snap.exists() ? snap.data() : {};
+  return {
+    maximumPoints: Number(s.maximumPoints ?? s.maxPoints ?? 100),
+    rankDecayFactor: Number(s.rankDecayFactor ?? s.decayA ?? 3),
+    repeatPenaltyPower: Number(s.repeatPenaltyPower ?? s.grindPower ?? 0.5)
+  };
 }
 
 function renderPlayers(){
@@ -122,6 +142,9 @@ function renderPlayers(){
     row.innerHTML = `<div>${displayRank}</div><div>${escapeHtml(data.nick ?? 'Без ника')}</div><div>${Number(data.points ?? 0)}</div>`;
     playersList.appendChild(row);
   });
+  statPlayers.textContent = String(usersCache.length);
+  renderPlayers();
+}
 
   if(!playersList.childElementCount) playersList.innerHTML = '<p>Ничего не найдено.</p>';
 }
@@ -140,9 +163,11 @@ function renderLevels(){
       return sortMode === 'rankDesc' ? br - ar : ar - br;
     });
 
+  const quantity = Math.max(list.length, 2);
   list.forEach(({data})=>{
     const safeLink = normalizeUrl(data.link);
     const safeFile = normalizeUrl(data.fileUrl);
+    const levelPoints = calculateCompletionPoints(Number(data.rank ?? 1), quantity, 1, scoringCfg);
     const item = document.createElement('div');
     item.className = 'item';
     item.innerHTML = `
@@ -150,6 +175,7 @@ function renderLevels(){
       ${safeLink ? `<a target="_blank" href="${escapeHtml(safeLink)}" rel="noopener noreferrer">Открыть уровень</a>` : '<span class="small">Некорректная ссылка</span>'}
       <br>${escapeHtml(data.text ?? '')}
       <br><span class="small">Файл: ${safeFile ? `<a target="_blank" href="${escapeHtml(safeFile)}" rel="noopener noreferrer">ссылка</a>` : '—'}</span>
+      <br><span class="small">Очки за прохождение: ${levelPoints}</span>
     `;
     levelsList.appendChild(item);
   });
@@ -171,6 +197,7 @@ async function refreshUsers(){
 
 async function refreshLevels(){
   const levelsSnap = await getDocs(query(collection(db,'levels'), orderBy('rank','asc')));
+  scoringCfg = await getScoring();
   levelsCache = [];
   levelsSnap.forEach(d=>levelsCache.push({ id:d.id, data:d.data() }));
   statLevels.textContent = String(levelsCache.filter(x=>x.data.status!=='archived').length);

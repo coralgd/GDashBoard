@@ -167,7 +167,12 @@ async function loadCompletionSubmissions(elder){
 
   const levelsSnap = await getDocs(collection(db,'levels'));
   const levels = [];
-  levelsSnap.forEach(d=>levels.push({id:d.id, ...d.data()}));
+  levelsSnap.forEach(d=>{
+    const lv = d.data();
+    if(lv.status === 'archived') return;
+    levels.push({id:d.id, ...lv});
+  });
+  levels.sort((a,b)=>Number(a.rank ?? 999999) - Number(b.rank ?? 999999));
   const quantity = Math.max(levels.length, 2);
   const scoreCfg = await getScoring();
   box.innerHTML = '';
@@ -176,12 +181,19 @@ async function loadCompletionSubmissions(elder){
     const s = d.data();
     const row = document.createElement('div');
     row.className='row';
+    const levelOptions = levels.map(lv=>
+      `<option value="${Number(lv.rank ?? 0)}">#${Number(lv.rank ?? 0)} · ${String(lv.text ?? 'Без названия').slice(0,80)}</option>`
+    ).join('');
     row.innerHTML = `
       <b>${s.nick ?? 'Без ника'}</b><br>
       <a href="${s.link}" target="_blank">Доказательство</a>
       <p>${s.text ?? ''}</p>
       <p class="small">Файл: ${s.fileUrl || '—'}</p>
-      <input type="number" min="1" max="${quantity}" placeholder="Место уровня в листе" class="rank">
+      <select class="levelRank">
+        <option value="">Выбери уровень из листа</option>
+        ${levelOptions}
+      </select>
+      <p class="small pointsPreview">Очки за подтверждение: —</p>
       <input placeholder="Комментарий" class="note">
       <div class="top-actions">
         <button class="approve">Подтвердить прохождение</button>
@@ -189,11 +201,24 @@ async function loadCompletionSubmissions(elder){
       </div>
     `;
     box.appendChild(row);
+    const rankSelect = row.querySelector('.levelRank');
+    const pointsPreview = row.querySelector('.pointsPreview');
+
+    const updatePreview = async ()=>{
+      const rank = Number(rankSelect.value);
+      if(!rank){ pointsPreview.textContent = 'Очки за подтверждение: —'; return; }
+      const userComps = await getDocs(query(collection(db,'completion_submissions'), where('playerId','==',s.playerId)));
+      let approvedCount = 0;
+      userComps.forEach(x=>{ if(x.data().status==='approved') approvedCount++; });
+      const earned = calculateCompletionPoints(rank, quantity, approvedCount + 1, scoreCfg);
+      pointsPreview.textContent = `Очки за подтверждение: ${earned}`;
+    };
+    rankSelect.onchange = ()=>{ updatePreview(); };
 
     row.querySelector('.approve').onclick = async ()=>{
       const note = row.querySelector('.note').value.trim();
-      const rank = Number(row.querySelector('.rank').value);
-      if(!rank){ alert('Укажи место уровня'); return; }
+      const rank = Number(rankSelect.value);
+      if(!rank){ alert('Выбери уровень из листа'); return; }
 
       const userRef = doc(db,'users',s.playerId);
       const userSnap = await getDoc(userRef);
@@ -226,16 +251,22 @@ async function loadLevelsManage(elder){
   box.innerHTML = 'Загрузка листа уровней...';
   const snap = await getDocs(query(collection(db,'levels'), orderBy('rank','asc')));
   if(snap.empty){ box.innerHTML='<p>Лист уровней пуст.</p>'; return; }
+  const levels = [];
+  snap.forEach(d=>levels.push({id:d.id, ...d.data()}));
+  const activeLevels = levels.filter(lv=>lv.status !== 'archived');
+  const quantity = Math.max(activeLevels.length, 2);
+  const scoreCfg = await getScoring();
   box.innerHTML = '';
 
-  snap.forEach(d=>{
-    const lv = d.data();
+  activeLevels.forEach(lv=>{
+    const levelPoints = calculateCompletionPoints(Number(lv.rank ?? 1), quantity, 1, scoreCfg);
     if(lv.status === 'archived') return;
     const row = document.createElement('div');
     row.className='row';
     row.innerHTML = `
       <b>#${lv.rank ?? '—'}</b><br>
       <a href="${lv.link}" target="_blank">Ссылка</a>
+      <p class="small">Очки за прохождение: ${levelPoints}</p>
       <textarea class="text">${lv.text ?? ''}</textarea>
       <input class="link" value="${lv.link ?? ''}" placeholder="Ссылка">
       <input class="file" value="${lv.fileUrl ?? ''}" placeholder="Файл">
@@ -253,13 +284,13 @@ async function loadLevelsManage(elder){
       const text = row.querySelector('.text').value.trim();
       const fileUrl = row.querySelector('.file').value.trim();
       if(!rank || !link){ alert('Нужны место и ссылка'); return; }
-      await updateDoc(doc(db,'levels',d.id), { rank, link, text, fileUrl, updatedBy:elder.uid, updatedAt:serverTimestamp() });
+      await updateDoc(doc(db,'levels',lv.id), { rank, link, text, fileUrl, updatedBy:elder.uid, updatedAt:serverTimestamp() });
       row.style.outline = '1px solid rgba(32,245,204,.7)';
     };
 
     row.querySelector('.delete').onclick = async ()=>{
       if(!confirm('Удалить уровень из листа?')) return;
-      await deleteDoc(doc(db,'levels',d.id));
+      await deleteDoc(doc(db,'levels',lv.id));
       row.remove();
     };
   });

@@ -120,7 +120,12 @@ async function loadPendingCompletions(me){
 
   const levelsSnap = await getDocs(collection(db,'levels'));
   const levels = [];
-  levelsSnap.forEach(d=>levels.push({id:d.id, ...d.data()}));
+  levelsSnap.forEach(d=>{
+    const lv = d.data();
+    if(lv.status === 'archived') return;
+    levels.push({id:d.id, ...lv});
+  });
+  levels.sort((a,b)=>Number(a.rank ?? 999999) - Number(b.rank ?? 999999));
   const quantity = Math.max(levels.length, 2);
   const scoreCfg = await getScoring();
 
@@ -129,12 +134,19 @@ async function loadPendingCompletions(me){
     const s = d.data();
     const row = document.createElement('div');
     row.className='row';
+    const levelOptions = levels.map(lv=>
+      `<option value="${Number(lv.rank ?? 0)}">#${Number(lv.rank ?? 0)} · ${String(lv.text ?? 'Без названия').slice(0,80)}</option>`
+    ).join('');
     row.innerHTML = `
       <b>${s.nick ?? 'Без ника'}</b><br>
       <a href="${s.link}" target="_blank">Доказательство</a>
       <p>${s.text ?? ''}</p>
       <p class="small">Файл: ${s.fileUrl || '—'}</p>
-      <input type="number" min="1" max="${quantity}" placeholder="Место уровня в листе" class="rank">
+      <select class="levelRank">
+        <option value="">Выбери уровень из листа</option>
+        ${levelOptions}
+      </select>
+      <p class="small pointsPreview">Очки за подтверждение: —</p>
       <input placeholder="Комментарий модератора" class="note">
       <div class="top-actions">
         <button class="approve">Подтвердить прохождение</button>
@@ -142,11 +154,24 @@ async function loadPendingCompletions(me){
       </div>
     `;
     box.appendChild(row);
+    const rankSelect = row.querySelector('.levelRank');
+    const pointsPreview = row.querySelector('.pointsPreview');
+
+    const updatePreview = async ()=>{
+      const rank = Number(rankSelect.value);
+      if(!rank){ pointsPreview.textContent = 'Очки за подтверждение: —'; return; }
+      const userComps = await getDocs(query(collection(db,'completion_submissions'), where('playerId','==',s.playerId)));
+      let approvedCount = 0;
+      userComps.forEach(x=>{ if(x.data().status==='approved') approvedCount++; });
+      const earned = calculateCompletionPoints(rank, quantity, approvedCount + 1, scoreCfg);
+      pointsPreview.textContent = `Очки за подтверждение: ${earned}`;
+    };
+    rankSelect.onchange = ()=>{ updatePreview(); };
 
     row.querySelector('.approve').onclick = async ()=>{
       const note = row.querySelector('.note').value.trim();
-      const rank = Number(row.querySelector('.rank').value);
-      if(!rank){ alert('Укажи место уровня'); return; }
+      const rank = Number(rankSelect.value);
+      if(!rank){ alert('Выбери уровень из листа'); return; }
 
       const userRef = doc(db,'users',s.playerId);
       const userSnap = await getDoc(userRef);
