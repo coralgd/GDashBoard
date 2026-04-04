@@ -15,10 +15,14 @@
 <script type="module">
 import { auth, db } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import { collection, query, where, orderBy, getDocs } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+import { collection, query, where, orderBy, getDocs, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
 onAuthStateChanged(auth, async u=>{
  if(!u) return location.href='index.html';
+
+ const meSnap = await getDoc(doc(db,'users',u.uid));
+ const me = meSnap.exists() ? meSnap.data() : null;
+ if(!me || me.situation!=='verified') return location.href='nick.html';
 
  const q=query(collection(db,'users'),where('situation','==','verified'),orderBy('points','desc'));
  const snap=await getDocs(q);
