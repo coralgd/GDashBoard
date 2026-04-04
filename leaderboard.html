@@ -8,9 +8,6 @@
   .panel{display:none}
   .panel.active{display:block}
   .item{border:1px solid #2d8cff55;background:rgba(0,20,50,.35);padding:10px;border-radius:10px;margin-bottom:10px}
-  .item input,.item textarea{width:100%;margin-top:6px}
-  .mod-panel{display:none;margin-top:12px}
-  .mod-panel.active{display:block}
   .badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:rgba(0,170,255,.18);border:1px solid rgba(0,170,255,.35);font-size:12px}
 </style>
 </head>
@@ -25,8 +22,7 @@
   <div class="stats-grid">
     <div class="stat"><div class="small">Верифицированных игроков</div><b id="statPlayers">—</b></div>
     <div class="stat"><div class="small">Уровней в листе</div><b id="statLevels">—</b></div>
-    <div class="stat"><div class="small">Заявок уровней</div><b id="statPendingLevels">—</b></div>
-    <div class="stat"><div class="small">Заявок прохождений</div><b id="statPendingCompletions">—</b></div>
+    <div class="stat"><div class="small">Режим</div><b class="badge">Публичный лист</b></div>
   </div>
 
   <p id="status" style="margin:8px 0 14px;color:#00ffff;">Загрузка...</p>
@@ -70,30 +66,7 @@
         <button id="goSubmitAppeal">Отправить апелляцию</button>
         <button id="goMySubmissions">Мои отправки</button>
       </div>
-    </div>
-
-    <div id="moderatorMenuCard" class="card" style="margin-top:12px;display:none;">
-      <h2 style="margin-top:0;">Меню уровней для модераторов</h2>
-      <p class="small">Проверка заявок, начисление очков и ручная постановка уровней в лист.</p>
-      <div class="menu-grid" style="margin-bottom:10px;">
-        <button data-mod-tab="pendingLevels">Заявки уровней <span id="pendingLevelsBadge" class="badge">0</span></button>
-        <button data-mod-tab="pendingCompletions">Заявки прохождений <span id="pendingCompletionsBadge" class="badge">0</span></button>
-        <button data-mod-tab="manualAdd">Ручное добавление</button>
-      </div>
-
-      <div id="pendingLevels" class="mod-panel active"></div>
-      <div id="pendingCompletions" class="mod-panel"></div>
-      <div id="manualAdd" class="mod-panel">
-        <div class="item">
-          <b>Ручное добавление уровня в лист</b>
-          <input id="mLink" placeholder="Ссылка на уровень">
-          <textarea id="mText" placeholder="Описание"></textarea>
-          <input id="mFile" placeholder="Ссылка на файл (опционально)">
-          <input id="mRank" type="number" min="1" placeholder="Место в листе">
-          <button id="mAdd">Добавить в лист</button>
-          <p id="mMsg" class="small"></p>
-        </div>
-      </div>
+      <p class="small" style="margin-top:10px;">Модерация перенесена в отдельную панель модератора.</p>
     </div>
   </div>
 </div>
@@ -101,9 +74,7 @@
 <script type="module">
 import { auth, db } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import {
-  collection, query, where, orderBy, getDocs, doc, getDoc, updateDoc, deleteDoc, addDoc, serverTimestamp
-} from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+import { collection, query, orderBy, getDocs, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
 const statusEl = document.getElementById('status');
 const playersList = document.getElementById('playersList');
@@ -115,11 +86,7 @@ const levelSort = document.getElementById('levelSort');
 
 const statPlayers = document.getElementById('statPlayers');
 const statLevels = document.getElementById('statLevels');
-const statPendingLevels = document.getElementById('statPendingLevels');
-const statPendingCompletions = document.getElementById('statPendingCompletions');
 
-let canModerateLevels = false;
-let currentModerator = null;
 let currentUid = null;
 let usersCache = [];
 let levelsCache = [];
@@ -145,39 +112,6 @@ function setTab(id){
   document.getElementById(id).classList.add('active');
   document.querySelectorAll('.tabs button').forEach(btn=>btn.classList.toggle('active', btn.dataset.tab===id));
   history.replaceState(null, '', `#${id}`);
-}
-
-function setModeratorTab(id){
-  document.querySelectorAll('.mod-panel').forEach(x=>x.classList.remove('active'));
-  const panel = document.getElementById(id);
-  if(panel) panel.classList.add('active');
-  document.querySelectorAll('[data-mod-tab]').forEach(btn=>btn.classList.toggle('active', btn.dataset.modTab===id));
-}
-
-function assertModerator(){
-  if(!canModerateLevels || !currentModerator){
-    alert('Недостаточно прав для модерации');
-    throw new Error('insufficient permissions');
-  }
-}
-
-function calculateCompletionPoints(listRank, listSize, approvedCompletionsCount, scoringSettings){
-  const normalizedListSize = Math.max(2, Number(listSize || 2));
-  const normalizedRank = Math.max(1, Math.min(Number(listRank || 1), normalizedListSize));
-  const normalizedPosition = (normalizedRank - 1) / (normalizedListSize - 1);
-  const positionScore = scoringSettings.maximumPoints * Math.exp(-scoringSettings.rankDecayFactor * normalizedPosition);
-  const antiGrindMultiplier = 1 / Math.pow(Math.max(1, approvedCompletionsCount), scoringSettings.repeatPenaltyPower);
-  return Math.round(positionScore * antiGrindMultiplier * 100) / 100;
-}
-
-async function getScoring(){
-  const snap = await getDoc(doc(db,'settings','scoring'));
-  const s = snap.exists() ? snap.data() : {};
-  return {
-    maximumPoints: Number(s.maximumPoints ?? s.maxPoints ?? 100),
-    rankDecayFactor: Number(s.rankDecayFactor ?? s.decayA ?? 3),
-    repeatPenaltyPower: Number(s.repeatPenaltyPower ?? s.grindPower ?? 0.5)
-  };
 }
 
 function renderPlayers(){
@@ -233,279 +167,23 @@ function renderLevels(){
     return sortMode === 'rankDesc' ? br - ar : ar - br;
   });
 
-  list.forEach(item=>{
-    const node = renderLevelCard(item.id, item.data);
-    if(node) levelsList.appendChild(node);
+  list.forEach(({data})=>{
+    const safeLink = normalizeUrl(data.link);
+    const safeFile = normalizeUrl(data.fileUrl);
+    const item = document.createElement('div');
+    item.className = 'item';
+    item.innerHTML = `
+      <b>#${Number(data.rank ?? 0) || '—'}</b> ·
+      ${safeLink ? `<a target="_blank" href="${escapeHtml(safeLink)}" rel="noopener noreferrer">Открыть уровень</a>` : '<span class="small">Некорректная ссылка</span>'}
+      <br>${escapeHtml(data.text ?? '')}
+      <br><span class="small">Файл: ${safeFile ? `<a target="_blank" href="${escapeHtml(safeFile)}" rel="noopener noreferrer">ссылка</a>` : '—'}</span>
+    `;
+    levelsList.appendChild(item);
   });
 
   if(!levelsList.childElementCount){
     levelsList.innerHTML = '<p>По текущему фильтру уровни не найдены.</p>';
   }
-}
-
-function renderLevelCard(levelId, lv){
-  if(lv.status === 'archived') return null;
-
-  const safeLink = normalizeUrl(lv.link);
-  const safeFile = normalizeUrl(lv.fileUrl);
-
-  const item = document.createElement('div');
-  item.className = 'item';
-
-  if(!canModerateLevels){
-    item.innerHTML = `
-      <b>#${Number(lv.rank ?? 0) || '—'}</b> ·
-      ${safeLink ? `<a target="_blank" href="${escapeHtml(safeLink)}" rel="noopener noreferrer">Открыть уровень</a>` : '<span class="small">Некорректная ссылка</span>'}
-      <br>${escapeHtml(lv.text ?? '')}
-      <br><span class="small">Файл: ${safeFile ? `<a target="_blank" href="${escapeHtml(safeFile)}" rel="noopener noreferrer">ссылка</a>` : '—'}</span>
-    `;
-    return item;
-  }
-
-  item.innerHTML = `
-    <b>#${Number(lv.rank ?? 0) || '—'}</b> ·
-    ${safeLink ? `<a target="_blank" href="${escapeHtml(safeLink)}" rel="noopener noreferrer">Открыть уровень</a>` : '<span class="small">Некорректная ссылка</span>'}
-    <textarea class="editText" placeholder="Описание">${escapeHtml(lv.text ?? '')}</textarea>
-    <input class="editLink" value="${escapeHtml(lv.link ?? '')}" placeholder="Ссылка на уровень">
-    <input class="editFile" value="${escapeHtml(lv.fileUrl ?? '')}" placeholder="Ссылка на файл (опционально)">
-    <input class="editRank" type="number" min="1" value="${Number(lv.rank ?? 1)}" placeholder="Место">
-    <div class="top-actions">
-      <button class="saveLevel">Сохранить</button>
-      <button class="deleteLevel btn-danger">Удалить уровень</button>
-    </div>
-  `;
-
-  item.querySelector('.saveLevel').onclick = async ()=>{
-    try {
-      assertModerator();
-      const rank = Number(item.querySelector('.editRank').value);
-      const link = normalizeUrl(item.querySelector('.editLink').value);
-      const text = item.querySelector('.editText').value.trim();
-      const fileUrl = normalizeUrl(item.querySelector('.editFile').value);
-
-      if(!rank || !link){ alert('Нужны корректные место и ссылка'); return; }
-      await updateDoc(doc(db,'levels',levelId), { rank, link, text, fileUrl });
-      item.style.outline = '1px solid rgba(32,245,204,.7)';
-
-      const target = levelsCache.find(x=>x.id===levelId);
-      if(target){
-        target.data = { ...target.data, rank, link, text, fileUrl };
-        renderLevels();
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  item.querySelector('.deleteLevel').onclick = async ()=>{
-    try {
-      assertModerator();
-      if(!confirm('Удалить уровень из листа?')) return;
-      await deleteDoc(doc(db,'levels',levelId));
-      levelsCache = levelsCache.filter(x=>x.id!==levelId);
-      statLevels.textContent = String(levelsCache.filter(x=>x.data.status!=='archived').length);
-      renderLevels();
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  return item;
-}
-
-async function loadPendingLevels(){
-  const box = document.getElementById('pendingLevels');
-  box.innerHTML = 'Загрузка заявок уровней...';
-  const snap = await getDocs(query(collection(db,'level_submissions'), where('status','==','pending')));
-
-  statPendingLevels.textContent = String(snap.size);
-  document.getElementById('pendingLevelsBadge').textContent = String(snap.size);
-
-  if(snap.empty){ box.innerHTML = '<p>Нет заявок.</p>'; return; }
-  box.innerHTML = '';
-
-  snap.forEach(d=>{
-    const s = d.data();
-    const row = document.createElement('div');
-    row.className='item';
-
-    const submissionLink = normalizeUrl(s.link);
-    const fileLink = normalizeUrl(s.fileUrl);
-
-    row.innerHTML = `
-      <b>${escapeHtml(s.nick ?? 'Без ника')}</b><br>
-      ${submissionLink ? `<a href="${escapeHtml(submissionLink)}" target="_blank" rel="noopener noreferrer">Ссылка</a>` : '<span class="small">Некорректная ссылка</span>'}
-      <p>${escapeHtml(s.text ?? '')}</p>
-      <p class="small">Файл: ${fileLink ? `<a href="${escapeHtml(fileLink)}" target="_blank" rel="noopener noreferrer">ссылка</a>` : '—'}</p>
-      <input placeholder="Комментарий модератора" class="note">
-      <input type="number" min="1" placeholder="Место в листе" class="rank">
-      <div class="top-actions">
-        <button class="approve">Одобрить и поставить в лист</button>
-        <button class="reject btn-danger">Отклонить</button>
-      </div>
-    `;
-    box.appendChild(row);
-
-    row.querySelector('.approve').onclick = async ()=>{
-      try {
-        assertModerator();
-        const note = row.querySelector('.note').value.trim();
-        const rank = Number(row.querySelector('.rank').value);
-        if(!rank || !submissionLink){ alert('Укажи место и корректную ссылку'); return; }
-
-        await addDoc(collection(db,'levels'), {
-          link: submissionLink,
-          text: String(s.text ?? ''),
-          fileUrl: fileLink,
-          rank,
-          addedBy: currentModerator.uid,
-          addedByNick: currentModerator.nick ?? 'moderator',
-          createdAt: serverTimestamp(),
-          sourceSubmissionId: d.id,
-          status:'active'
-        });
-        await updateDoc(doc(db,'level_submissions',d.id), {
-          status:'approved', note, reviewedBy:currentModerator.uid, reviewedAt:serverTimestamp(), finalRank:rank
-        });
-
-        row.remove();
-        await refreshLevels();
-        await loadPendingLevels();
-      } catch (err) {
-        console.error(err);
-      }
-    };
-
-    row.querySelector('.reject').onclick = async ()=>{
-      try {
-        assertModerator();
-        const note = row.querySelector('.note').value.trim() || 'Отклонено модератором';
-        await updateDoc(doc(db,'level_submissions',d.id), {
-          status:'rejected', note, reviewedBy:currentModerator.uid, reviewedAt:serverTimestamp()
-        });
-        row.remove();
-        await loadPendingLevels();
-      } catch (err) {
-        console.error(err);
-      }
-    };
-  });
-}
-
-async function loadPendingCompletions(){
-  const box = document.getElementById('pendingCompletions');
-  box.innerHTML = 'Загрузка заявок прохождений...';
-  const snap = await getDocs(query(collection(db,'completion_submissions'), where('status','==','pending')));
-
-  statPendingCompletions.textContent = String(snap.size);
-  document.getElementById('pendingCompletionsBadge').textContent = String(snap.size);
-
-  if(snap.empty){ box.innerHTML = '<p>Нет заявок.</p>'; return; }
-
-  const quantity = Math.max(levelsCache.filter(x=>x.data.status!=='archived').length, 2);
-  const scoreCfg = await getScoring();
-
-  box.innerHTML = '';
-  snap.forEach(d=>{
-    const s = d.data();
-    const row = document.createElement('div');
-    row.className='item';
-
-    const proofLink = normalizeUrl(s.link);
-    const fileLink = normalizeUrl(s.fileUrl);
-
-    row.innerHTML = `
-      <b>${escapeHtml(s.nick ?? 'Без ника')}</b><br>
-      ${proofLink ? `<a href="${escapeHtml(proofLink)}" target="_blank" rel="noopener noreferrer">Доказательство</a>` : '<span class="small">Некорректная ссылка</span>'}
-      <p>${escapeHtml(s.text ?? '')}</p>
-      <p class="small">Файл: ${fileLink ? `<a href="${escapeHtml(fileLink)}" target="_blank" rel="noopener noreferrer">ссылка</a>` : '—'}</p>
-      <input type="number" min="1" max="${quantity}" placeholder="Место уровня в листе" class="rank">
-      <input placeholder="Комментарий модератора" class="note">
-      <div class="top-actions">
-        <button class="approve">Подтвердить прохождение</button>
-        <button class="reject btn-danger">Отклонить</button>
-      </div>
-    `;
-    box.appendChild(row);
-
-    row.querySelector('.approve').onclick = async ()=>{
-      try {
-        assertModerator();
-        const note = row.querySelector('.note').value.trim();
-        const rank = Number(row.querySelector('.rank').value);
-        if(!rank || !proofLink){ alert('Укажи место и корректную ссылку'); return; }
-
-        const userRef = doc(db,'users',s.playerId);
-        const userSnap = await getDoc(userRef);
-        const u = userSnap.exists() ? userSnap.data() : null;
-        if(!u){ alert('Игрок не найден'); return; }
-
-        const userComps = await getDocs(query(collection(db,'completion_submissions'), where('playerId','==',s.playerId)));
-        let approvedCount = 0;
-        userComps.forEach(x=>{ if(x.data().status==='approved') approvedCount++; });
-        const k = approvedCount + 1;
-
-        const earned = calculateCompletionPoints(rank, quantity, k, scoreCfg);
-        const newPoints = Number(u.points ?? 0) + earned;
-
-        await updateDoc(userRef, { points:newPoints });
-        await updateDoc(doc(db,'completion_submissions',d.id), {
-          status:'approved', note, reviewedBy:currentModerator.uid, reviewedAt:serverTimestamp(),
-          awardedPoints:earned, listRank:rank, listQuantity:quantity, scoreK:k
-        });
-
-        row.remove();
-        await refreshUsers();
-        await loadPendingCompletions();
-      } catch (err) {
-        console.error(err);
-      }
-    };
-
-    row.querySelector('.reject').onclick = async ()=>{
-      try {
-        assertModerator();
-        const note = row.querySelector('.note').value.trim() || 'Отклонено модератором';
-        await updateDoc(doc(db,'completion_submissions',d.id), {
-          status:'rejected', note, reviewedBy:currentModerator.uid, reviewedAt:serverTimestamp()
-        });
-        row.remove();
-        await loadPendingCompletions();
-      } catch (err) {
-        console.error(err);
-      }
-    };
-  });
-}
-
-function setupManualAdd(){
-  document.getElementById('mAdd').onclick = async ()=>{
-    try {
-      assertModerator();
-      const link = normalizeUrl(document.getElementById('mLink').value);
-      const text = document.getElementById('mText').value.trim();
-      const fileUrl = normalizeUrl(document.getElementById('mFile').value);
-      const rank = Number(document.getElementById('mRank').value);
-      const msg = document.getElementById('mMsg');
-      if(!link || !text || !rank){ msg.textContent='Нужны корректные ссылка, текст и место'; return; }
-
-      await addDoc(collection(db,'levels'), {
-        link, text, fileUrl, rank,
-        addedBy:currentModerator.uid, addedByNick:currentModerator.nick ?? 'moderator', createdAt:serverTimestamp(),
-        status:'active', sourceSubmissionId:null
-      });
-
-      msg.textContent='Уровень добавлен в лист.';
-      document.getElementById('mLink').value = '';
-      document.getElementById('mText').value = '';
-      document.getElementById('mFile').value = '';
-      document.getElementById('mRank').value = '';
-
-      await refreshLevels();
-    } catch (err) {
-      console.error(err);
-    }
-  };
 }
 
 async function refreshUsers(){
@@ -529,8 +207,6 @@ async function refreshLevels(){
 }
 
 document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
-document.querySelectorAll('[data-mod-tab]').forEach(b=>b.onclick=()=>setModeratorTab(b.dataset.modTab));
-
 playerSearch.oninput = renderPlayers;
 roleFilter.onchange = renderPlayers;
 levelSearch.oninput = renderLevels;
@@ -555,26 +231,8 @@ onAuthStateChanged(auth, async u=>{
     const me = meSnap.exists() ? meSnap.data() : null;
     if(!me || me.situation!=='verified') return location.href='nick.html';
 
-    canModerateLevels = (me.role==='moderator' || me.role==='elder');
-    currentModerator = canModerateLevels ? { uid:u.uid, nick:me.nick ?? 'moderator' } : null;
-
-    if(canModerateLevels){
-      document.getElementById('moderatorMenuCard').style.display = '';
-      setModeratorTab('pendingLevels');
-      setupManualAdd();
-    }
-
     await refreshUsers();
     await refreshLevels();
-
-    if(canModerateLevels){
-      await loadPendingLevels();
-      await loadPendingCompletions();
-    } else {
-      statPendingLevels.textContent = '—';
-      statPendingCompletions.textContent = '—';
-    }
-
     statusEl.textContent = '';
   } catch (e) {
     console.error(e);
