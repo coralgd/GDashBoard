@@ -9,31 +9,53 @@
 
 <div class="hud" style="max-width:900px;margin:40px auto;">
 <h1>Лидерборд</h1>
+<p id="status" style="margin:8px 0 14px;color:#00ffff;">Загрузка...</p>
 <div id="list"></div>
 </div>
 
 <script type="module">
 import { auth, db } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import { collection, query, where, orderBy, getDocs } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+import { collection, query, orderBy, getDocs, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+
+const list = document.getElementById('list');
+const statusEl = document.getElementById('status');
 
 onAuthStateChanged(auth, async u=>{
  if(!u) return location.href='index.html';
 
- const q=query(collection(db,'users'),where('situation','==','verified'),orderBy('points','desc'));
- const snap=await getDocs(q);
- let r=0,p=0,last=null;
- snap.forEach(d=>{
-   const u2=d.data(); r++;
-   if(u2.points!==last){p=r;last=u2.points;}
-   const row=document.createElement('div');
-   row.className='row';
-   if(d.id===u.uid) row.classList.add('me');
-   if(u2.role==='moderator') row.classList.add('moderator');
-   if(u2.role==='elder') row.classList.add('elder');
-   row.innerHTML=`<div>${p}</div><div>${u2.nick}</div><div>${u2.points}</div>`;
-   list.appendChild(row);
- });
+ try {
+  const meSnap = await getDoc(doc(db,'users',u.uid));
+  const me = meSnap.exists() ? meSnap.data() : null;
+  if(!me || me.situation!=='verified') return location.href='nick.html';
+
+  const q=query(collection(db,'users'),orderBy('points','desc'));
+  const snap=await getDocs(q);
+
+  statusEl.textContent='';
+
+  let r=0,p=0,last=null;
+  snap.forEach(d=>{
+    const u2=d.data();
+    if(u2.situation!=='verified') return;
+    r++;
+    if(u2.points!==last){p=r;last=u2.points;}
+    const row=document.createElement('div');
+    row.className='row';
+    if(d.id===u.uid) row.classList.add('me');
+    if(u2.role==='moderator') row.classList.add('moderator');
+    if(u2.role==='elder') row.classList.add('elder');
+    row.innerHTML=`<div>${p}</div><div>${u2.nick ?? 'Без ника'}</div><div>${u2.points ?? 0}</div>`;
+    list.appendChild(row);
+  });
+
+  if(!list.childElementCount){
+   statusEl.textContent='Пока нет верифицированных участников.';
+  }
+ } catch (e) {
+  console.error(e);
+  statusEl.textContent='Не удалось загрузить лидерборд. Попробуйте позже.';
+ }
 });
 </script>
 </body>

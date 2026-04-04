@@ -8,54 +8,68 @@
 <body>
 <div class="hud" style="max-width:900px;margin:40px auto;">
   <h1>Панель модератора</h1>
+  <p id="status" style="color:#00ffff;">Загрузка...</p>
   <div id="list"></div>
 </div>
 
 <script type="module">
 import { auth, db } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import { collection, query, where, orderBy, getDocs, doc, updateDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+import { collection, query, orderBy, getDocs, doc, updateDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
 onAuthStateChanged(auth, async user => {
   if(!user) return location.href='index.html';
-  const meSnap = await getDoc(doc(db,'users',user.uid));
-  const me = meSnap.data();
-  if(me.role!=='moderator' && me.role!=='elder') return location.href='main.html';
-  if(me.situation!=='verified') return location.href='nick.html';
+  const statusEl = document.getElementById('status');
+  const list = document.getElementById('list');
 
-  const q = query(collection(db,'users'), where('situation','==','verified'), orderBy('points','desc'));
-  const snap = await getDocs(q);
+  try {
+    const meSnap = await getDoc(doc(db,'users',user.uid));
+    const me = meSnap.exists() ? meSnap.data() : null;
+    if(!me || me.situation!=='verified') return location.href='nick.html';
+    if(me.role!=='moderator' && me.role!=='elder') return location.href='main.html';
 
-  snap.forEach(d => {
-    const u = d.data();
-    if(u.role==='moderator' || u.role==='elder') return;
+    const q = query(collection(db,'users'), orderBy('points','desc'));
+    const snap = await getDocs(q);
 
-    const row = document.createElement('div');
-    row.className='row';
-    row.style.display='grid';
-    row.style.gridTemplateColumns='2fr 1fr 1fr';
-    row.style.alignItems='center';
-    row.style.marginBottom='8px';
+    let rendered = 0;
+    snap.forEach(d => {
+      const u = d.data();
+      if(u.situation!=='verified') return;
+      if(u.role==='moderator' || u.role==='elder') return;
 
-    const nickDiv = document.createElement('div');
-    nickDiv.textContent = u.nick;
+      const row = document.createElement('div');
+      row.className='row';
+      row.style.display='grid';
+      row.style.gridTemplateColumns='2fr 1fr 1fr';
+      row.style.alignItems='center';
+      row.style.marginBottom='8px';
 
-    const input = document.createElement('input');
-    input.type='number';
-    input.value = u.points;
-    input.style.width='80px';
+      const nickDiv = document.createElement('div');
+      nickDiv.textContent = u.nick ?? 'Без ника';
 
-    const pointsBtn = document.createElement('button');
-    pointsBtn.textContent='Баллы';
-    pointsBtn.onclick = async ()=>{
-      await updateDoc(doc(db,'users',d.id),{ points:Number(input.value) });
-    };
+      const input = document.createElement('input');
+      input.type='number';
+      input.value = u.points ?? 0;
+      input.style.width='80px';
 
-    row.appendChild(nickDiv);
-    row.appendChild(input);
-    row.appendChild(pointsBtn);
-    document.getElementById('list').appendChild(row);
-  });
+      const pointsBtn = document.createElement('button');
+      pointsBtn.textContent='Баллы';
+      pointsBtn.onclick = async ()=>{
+        await updateDoc(doc(db,'users',d.id),{ points:Number(input.value) });
+      };
+
+      row.appendChild(nickDiv);
+      row.appendChild(input);
+      row.appendChild(pointsBtn);
+      list.appendChild(row);
+      rendered++;
+    });
+
+    statusEl.textContent = rendered ? '' : 'Нет игроков для модерации.';
+  } catch (e) {
+    console.error(e);
+    statusEl.textContent = 'Не удалось загрузить панель модерации.';
+  }
 });
 </script>
 </body>
