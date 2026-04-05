@@ -77,6 +77,17 @@ onAuthStateChanged(auth, async user => {
       else if(profile.role==='moderator') location.href='moderator.html';
       else err.textContent='Доступно только модераторам';
     };
+
+    try {
+      const msgSnap = await getDocs(query(collection(db,'moderator_messages'), where('playerId','==',user.uid)));
+      const messages = [];
+      msgSnap.forEach(d=>messages.push(d.data()));
+      messages.sort((a,b)=>(b.createdAt?.seconds ?? 0)-(a.createdAt?.seconds ?? 0));
+      messagesBox.innerHTML = `<h3 style="margin-top:0;">Сообщения от модераторов</h3>${messages.map(m=>`<div class="list-item"><b>${m.authorNick ?? 'модератор'}</b><p class="small">${m.text ?? ''}</p></div>`).join('') || '<p class="small">Пока нет сообщений.</p>'}`;
+    } catch {
+      messagesBox.innerHTML = `<h3 style="margin-top:0;">Сообщения от модераторов</h3><p class="small">Сообщения временно недоступны.</p>`;
+    }
+
     statusEl.textContent = '';
   } catch (e) {
     statusEl.textContent = getNetworkErrorMessage(e);
