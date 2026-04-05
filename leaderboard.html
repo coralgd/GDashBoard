@@ -42,13 +42,7 @@
     </div>
     <div id="modalBody"></div>
   </div>
-
-  <p id="status" style="color:#00ffff;">Загрузка...</p>
-  <div class="row small"><div>#</div><div>Ник</div><div>Очки</div></div>
-  <div id="list"></div>
 </div>
-
-<div id="modal" class="dialog-backdrop"><div class="dialog"><div class="page-header"><h2 id="mTitle">Инфо</h2><button id="mClose" class="btn-ghost">Закрыть</button></div><div id="mBody"></div></div></div>
 
 <script type="module">
 import { auth, db, getNetworkErrorMessage } from './firebase.js';
@@ -231,7 +225,7 @@ onAuthStateChanged(auth, async user => {
   try {
     const meSnap = await getDoc(doc(db,'users',user.uid));
     const me = meSnap.exists() ? meSnap.data() : null;
-    if(!me || me.situation!=='verified') return location.href='nick.html';
+    if(!me) return location.href='nick.html';
 
     const [usersSnap, levelsSnap, allCompSnap, approvedSnap, scoreSnap] = await Promise.all([
       getDocs(query(collection(db,'users'), orderBy('points','desc'))),
