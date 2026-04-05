@@ -1,22 +1,35 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8">
-  <title>Панель старшего модератора</title>
-  <link rel="stylesheet" href="hud.css">
-  <style>
-    .section{display:none}
-    .section.active{display:block}
-  </style>
+<meta charset="UTF-8">
+<title>SpinList — Старший модератор</title>
+<link rel="stylesheet" href="hud.css">
+<style>
+  .tabs button{margin-right:8px}
+  .panel{display:none;margin-top:14px}
+  .panel.active{display:block}
+  .row{border:1px solid #2d8cff55;background:rgba(0,20,50,.35);padding:10px;border-radius:8px;margin-bottom:10px}
+  .row input,.row textarea{width:100%;margin:6px 0}
+  .small{font-size:12px;opacity:.85}
+</style>
 </head>
 <body>
-  <div class="hud">
-    <div class="page-header">
-      <h1>Панель старшего модератора</h1>
-      <button id="back" class="btn-ghost">На главную</button>
-    </div>
+<div class="brand-hero">
+  <img src="spinlist-logo.svg" alt="SpinList logo">
+  <div class="brand-title">SPINLIST</div>
+</div>
+<div class="hud" style="max-width:1100px;margin:40px auto;">
+  <h1>Панель старшего модератора</h1>
+  <p id="status" style="color:#00ffff;">Загрузка...</p>
 
-    <p id="status" style="color:#00ffff">Загрузка...</p>
+  <div class="tabs">
+    <button data-tab="users">Пользователи</button>
+    <button data-tab="settings">Параметры очков</button>
+    <button data-tab="appeals">Апелляции</button>
+    <button data-tab="levelSubmissions">Заявки уровней</button>
+    <button data-tab="completionSubmissions">Заявки прохождений</button>
+    <button data-tab="manualLevel">Поставить уровень</button>
+  </div>
 
     <div class="top-actions">
       <button id="goLevels">Меню листа</button>

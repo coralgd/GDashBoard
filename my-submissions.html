@@ -1,4 +1,27 @@
-<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8"><title>Мои отправки</title><link rel="stylesheet" href="hud.css"></head><body><div class="hud" style="max-width:800px"><h1>Мои отправки</h1><div class="top-actions"><button id="back">Назад</button></div><p id="status" style="color:#00ffff">Загрузка...</p><div id="list"></div></div>
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>SpinList — Мои отправки</title>
+<link rel="stylesheet" href="hud.css">
+<style>
+  .item { padding:10px; border:1px solid #2d8cff55; margin-bottom:8px; border-radius:8px; background:rgba(0,20,50,.35); }
+</style>
+</head>
+<body>
+<div class="brand-hero">
+  <img src="spinlist-logo.svg" alt="SpinList logo">
+  <div class="brand-title">SPINLIST</div>
+</div>
+<div class="hud" style="max-width:800px;margin:40px auto;">
+  <h1>Мои отправки и результаты</h1>
+  <div class="top-actions">
+    <button id="back">Назад</button>
+  </div>
+  <p id="status" style="color:#00ffff">Загрузка...</p>
+  <div id="list"></div>
+</div>
+
 <script type="module">
 import { auth, db, getNetworkErrorMessage } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
