@@ -10,6 +10,7 @@
   .unverified{color:#8c97a8;opacity:.65}
   .modal-section{display:none}
   .modal-section.active{display:block}
+  .users-head{opacity:.7;font-size:12px}
 </style>
 </head>
 <body>
@@ -25,6 +26,7 @@
   </div>
 
   <h2>Игроки</h2>
+  <div class="row users-head"><div>ID</div><div>Ник</div><div>Очки</div></div>
   <div id="users"></div>
 </div>
 
@@ -48,14 +50,18 @@ import { collection, query, orderBy, where, getDocs, doc, updateDoc, getDoc, del
 const statusEl = document.getElementById('status');
 const usersEl = document.getElementById('users');
 const modal = document.getElementById('playerModal');
+const profileSection = document.getElementById('profileSection');
+const submissionsSection = document.getElementById('submissionsSection');
+let openedPlayer = null;
+let openedSubmissions = [];
 
 document.getElementById('backMain').onclick = ()=> location.href='main.html';
 document.getElementById('goElderLevels').onclick = ()=> location.href='elder-levels.html';
 document.getElementById('closePlayerModal').onclick = ()=> modal.classList.remove('open');
 
 function switchModalSection(name){
-  document.getElementById('profileSection').classList.toggle('active', name==='profile');
-  document.getElementById('submissionsSection').classList.toggle('active', name==='submissions');
+  profileSection.classList.toggle('active', name==='profile');
+  submissionsSection.classList.toggle('active', name==='submissions');
 }
 
 async function clearUserHistory(userId){
@@ -70,123 +76,195 @@ async function clearUserHistory(userId){
   for (const d of appeals.docs) await deleteDoc(doc(db,'appeals',d.id));
 }
 
+function fieldLabel(text){
+  const x = document.createElement('label');
+  x.className = 'small';
+  x.textContent = text;
+  return x;
+}
+
+function makeInput(type='text'){
+  const x = document.createElement('input');
+  x.type = type;
+  return x;
+}
+
+async function loadPlayerSubmissions(userId){
+  const [levelSubs, compSubs, appealSubs] = await Promise.all([
+    getDocs(query(collection(db,'level_submissions'), where('authorId','==',userId))),
+    getDocs(query(collection(db,'completion_submissions'), where('playerId','==',userId))),
+    getDocs(query(collection(db,'appeals'), where('playerId','==',userId)))
+  ]);
+
+  const all = [];
+  levelSubs.forEach(d=>all.push({type:'level', ...d.data()}));
+  compSubs.forEach(d=>all.push({type:'completion', ...d.data()}));
+  appealSubs.forEach(d=>all.push({type:'appeal', ...d.data()}));
+  return all;
+}
+
+function renderSubmissionsList(searchInput, typeSelect, statusSelect, listEl){
+  const q = searchInput.value.trim().toLowerCase();
+  const type = typeSelect.value;
+  const status = statusSelect.value;
+  listEl.innerHTML = '';
+
+  const filtered = openedSubmissions.filter(x=>{
+    if(type !== 'all' && x.type !== type) return false;
+    if(status !== 'all' && x.status !== status) return false;
+    const hay = `${x.levelName ?? ''} ${x.nick ?? ''} ${x.text ?? ''} ${x.status ?? ''}`.toLowerCase();
+    return !q || hay.includes(q);
+  });
+
+  if(!filtered.length){
+    listEl.innerHTML = '<p>Отправки не найдены.</p>';
+    return;
+  }
+
+  filtered.forEach((x, idx)=>{
+    const row = document.createElement('div');
+    row.className = 'row';
+    const col1 = document.createElement('div');
+    col1.textContent = String(idx + 1);
+    const col2 = document.createElement('div');
+    col2.textContent = `[${x.type}] ${x.levelName ?? x.text ?? 'Без текста'}`;
+    const col3 = document.createElement('div');
+    col3.textContent = x.status ?? '—';
+    row.append(col1, col2, col3);
+    listEl.appendChild(row);
+  });
+}
+
 async function openPlayerModal(userDoc){
   const { id, data } = userDoc;
-  document.getElementById('playerModalTitle').textContent = data.nick ?? 'Игрок';
+  openedPlayer = { id, data: { ...data } };
 
-  const profile = document.getElementById('profileSection');
-  const submissions = document.getElementById('submissionsSection');
+  document.getElementById('playerModalTitle').textContent = openedPlayer.data.nick || 'Игрок';
+  profileSection.innerHTML = '';
+  submissionsSection.innerHTML = '';
 
-  profile.innerHTML = `
-    <label class="small">Ник</label>
-    <input id="modalNick" value="${data.nick ?? ''}" placeholder="Ник">
-    <label class="small">Почта</label>
-    <input id="modalEmail" value="${data.email ?? ''}" placeholder="Почта" readonly>
-    <label class="small">Очки</label>
-    <input id="modalPoints" type="number" value="${Number(data.points ?? 0)}" placeholder="Очки">
-    <label class="small">Роль</label>
-    <select id="modalRole">
-      <option value="player" ${data.role==='player' || !data.role ? 'selected' : ''}>player</option>
-      <option value="moderator" ${data.role==='moderator' ? 'selected' : ''}>moderator</option>
-      <option value="elder" ${data.role==='elder' ? 'selected' : ''}>elder</option>
-    </select>
-    <div class="top-actions">
-      <button id="toggleVer">${data.situation==='verified' ? 'Снять верифку' : 'Верифицировать'}</button>
-      <button id="openSubs">Отправки</button>
-      <button id="clearHistory" class="btn-danger">Очистить историю отправок</button>
-    </div>
-  `;
+  const nickInput = makeInput('text');
+  nickInput.value = openedPlayer.data.nick ?? '';
+  nickInput.placeholder = 'Ник';
 
-  const nickInput = document.getElementById('modalNick');
-  const pointsInput = document.getElementById('modalPoints');
-  const roleSelect = document.getElementById('modalRole');
+  const emailInput = makeInput('text');
+  emailInput.value = openedPlayer.data.email ?? '';
+  emailInput.readOnly = true;
+
+  const pointsInput = makeInput('number');
+  pointsInput.value = String(Number(openedPlayer.data.points ?? 0));
+  pointsInput.placeholder = 'Очки';
+
+  const roleSelect = document.createElement('select');
+  ['player', 'moderator', 'elder'].forEach(role=>{
+    const option = document.createElement('option');
+    option.value = role;
+    option.textContent = role;
+    if((openedPlayer.data.role ?? 'player') === role) option.selected = true;
+    roleSelect.appendChild(option);
+  });
+
+  const actions = document.createElement('div');
+  actions.className = 'top-actions';
+
+  const verifyBtn = document.createElement('button');
+  verifyBtn.textContent = openedPlayer.data.situation === 'verified' ? 'Снять верифку' : 'Верифицировать';
+  const openSubsBtn = document.createElement('button');
+  openSubsBtn.textContent = 'Отправки';
+  const clearHistoryBtn = document.createElement('button');
+  clearHistoryBtn.className = 'btn-danger';
+  clearHistoryBtn.textContent = 'Очистить историю отправок';
+
+  actions.append(verifyBtn, openSubsBtn, clearHistoryBtn);
+  profileSection.append(
+    fieldLabel('Ник'), nickInput,
+    fieldLabel('Почта'), emailInput,
+    fieldLabel('Очки'), pointsInput,
+    fieldLabel('Роль'), roleSelect,
+    actions
+  );
 
   nickInput.onchange = async ()=>{
-    await updateDoc(doc(db,'users',id), { nick:nickInput.value.trim() });
-    document.getElementById('playerModalTitle').textContent = nickInput.value.trim() || 'Игрок';
+    const next = nickInput.value.trim();
+    await updateDoc(doc(db,'users',id), { nick: next });
+    openedPlayer.data.nick = next;
+    document.getElementById('playerModalTitle').textContent = next || 'Игрок';
+    await loadUsers();
   };
+
   pointsInput.onchange = async ()=>{
-    await updateDoc(doc(db,'users',id), { points:Number(pointsInput.value) });
+    const next = Number(pointsInput.value || 0);
+    await updateDoc(doc(db,'users',id), { points: next });
+    openedPlayer.data.points = next;
+    await loadUsers();
   };
+
   roleSelect.onchange = async ()=>{
-    await updateDoc(doc(db,'users',id), { role:roleSelect.value });
+    await updateDoc(doc(db,'users',id), { role: roleSelect.value });
+    openedPlayer.data.role = roleSelect.value;
+    await loadUsers();
   };
 
-  document.getElementById('toggleVer').onclick = async ()=>{
-    const newSit = data.situation==='verified' ? 'not requested' : 'verified';
-    await updateDoc(doc(db,'users',id), { situation:newSit });
-    data.situation = newSit;
-    document.getElementById('toggleVer').textContent = data.situation==='verified' ? 'Снять верифку' : 'Верифицировать';
+  verifyBtn.onclick = async ()=>{
+    const next = openedPlayer.data.situation === 'verified' ? 'not requested' : 'verified';
+    await updateDoc(doc(db,'users',id), { situation: next });
+    openedPlayer.data.situation = next;
+    verifyBtn.textContent = next === 'verified' ? 'Снять верифку' : 'Верифицировать';
+    await loadUsers();
   };
 
-  document.getElementById('clearHistory').onclick = async ()=>{
+  clearHistoryBtn.onclick = async ()=>{
     if(!confirm('Удалить всю историю отправок этого игрока?')) return;
     await clearUserHistory(id);
+    openedSubmissions = [];
     alert('История очищена');
   };
 
-  document.getElementById('openSubs').onclick = ()=>switchModalSection('submissions');
+  const topActions = document.createElement('div');
+  topActions.className = 'top-actions';
+  const backProfileBtn = document.createElement('button');
+  backProfileBtn.className = 'btn-ghost';
+  backProfileBtn.textContent = 'Назад к профилю';
+  topActions.appendChild(backProfileBtn);
 
-  const [levelSubs, compSubs, appealSubs] = await Promise.all([
-    getDocs(query(collection(db,'level_submissions'), where('authorId','==',id))),
-    getDocs(query(collection(db,'completion_submissions'), where('playerId','==',id))),
-    getDocs(query(collection(db,'appeals'), where('playerId','==',id)))
-  ]);
-
-  const allSubs = [];
-  levelSubs.forEach(d=>allSubs.push({type:'level', ...d.data()}));
-  compSubs.forEach(d=>allSubs.push({type:'completion', ...d.data()}));
-  appealSubs.forEach(d=>allSubs.push({type:'appeal', ...d.data()}));
-
-  submissions.innerHTML = `
-    <div class="top-actions">
-      <button id="backToProfile" class="btn-ghost">Назад к профилю</button>
-    </div>
-    <div class="toolbar">
-      <input id="subSearch" placeholder="Поиск отправок">
-      <select id="subType">
-        <option value="all">Все типы</option>
-        <option value="level">Уровни</option>
-        <option value="completion">Прохождения</option>
-        <option value="appeal">Апелляции</option>
-      </select>
-      <select id="subStatus">
-        <option value="all">Все статусы</option>
-        <option value="approved">Только успешные</option>
-      </select>
-    </div>
-    <div id="subList"></div>
+  const toolbar = document.createElement('div');
+  toolbar.className = 'toolbar';
+  const subSearch = makeInput('text');
+  subSearch.placeholder = 'Поиск отправок';
+  const subType = document.createElement('select');
+  subType.innerHTML = `
+    <option value="all">Все типы</option>
+    <option value="level">Уровни</option>
+    <option value="completion">Прохождения</option>
+    <option value="appeal">Апелляции</option>
   `;
+  const subStatus = document.createElement('select');
+  subStatus.innerHTML = `
+    <option value="all">Все статусы</option>
+    <option value="approved">Только успешные</option>
+    <option value="pending">Ожидают</option>
+    <option value="rejected">Отклонённые</option>
+  `;
+  toolbar.append(subSearch, subType, subStatus);
 
-  document.getElementById('backToProfile').onclick = ()=>switchModalSection('profile');
+  const subList = document.createElement('div');
+  submissionsSection.append(topActions, toolbar, subList);
 
-  function renderSubs(){
-    const q = document.getElementById('subSearch').value.trim().toLowerCase();
-    const t = document.getElementById('subType').value;
-    const s = document.getElementById('subStatus').value;
-    const box = document.getElementById('subList');
-    box.innerHTML = '';
+  backProfileBtn.onclick = ()=>switchModalSection('profile');
+  subSearch.oninput = ()=>renderSubmissionsList(subSearch, subType, subStatus, subList);
+  subType.onchange = ()=>renderSubmissionsList(subSearch, subType, subStatus, subList);
+  subStatus.onchange = ()=>renderSubmissionsList(subSearch, subType, subStatus, subList);
 
-    const filtered = allSubs.filter(x=>{
-      if(t !== 'all' && x.type !== t) return false;
-      if(s !== 'all' && x.status !== s) return false;
-      const hay = `${x.text ?? ''} ${x.status ?? ''} ${x.nick ?? ''}`.toLowerCase();
-      return !q || hay.includes(q);
-    });
-
-    if(!filtered.length){ box.innerHTML = '<p>Отправки не найдены.</p>'; return; }
-    filtered.forEach(x=>{
-      const row = document.createElement('div');
-      row.className='row';
-      row.innerHTML = `<b>[${x.type}]</b> ${x.status ?? '—'}<br>${x.text ?? ''}`;
-      box.appendChild(row);
-    });
-  }
-
-  document.getElementById('subSearch').oninput = renderSubs;
-  document.getElementById('subType').onchange = renderSubs;
-  document.getElementById('subStatus').onchange = renderSubs;
-  renderSubs();
+  openSubsBtn.onclick = async ()=>{
+    openSubsBtn.disabled = true;
+    try {
+      openedSubmissions = await loadPlayerSubmissions(id);
+      renderSubmissionsList(subSearch, subType, subStatus, subList);
+      switchModalSection('submissions');
+    } finally {
+      openSubsBtn.disabled = false;
+    }
+  };
 
   switchModalSection('profile');
   modal.classList.add('open');
@@ -198,6 +276,7 @@ async function loadUsers(){
   if(snap.empty){ usersEl.innerHTML = '<p>Нет пользователей.</p>'; return; }
 
   usersEl.innerHTML = '';
+  let pos = 1;
   snap.forEach(d=>{
     const u = d.data();
     const row = document.createElement('div');
@@ -205,7 +284,13 @@ async function loadUsers(){
     if(u.role==='moderator') row.classList.add('moderator');
     if(u.role==='elder') row.classList.add('elder');
     if(u.situation!=='verified') row.classList.add('unverified');
-    row.innerHTML = `<div>${u.nick ?? 'Без ника'}</div><div></div><div>${Number(u.points ?? 0)}</div>`;
+    const c1 = document.createElement('div');
+    c1.textContent = String(pos++);
+    const c2 = document.createElement('div');
+    c2.textContent = u.nick ?? 'Без ника';
+    const c3 = document.createElement('div');
+    c3.textContent = String(Number(u.points ?? 0));
+    row.append(c1, c2, c3);
     row.onclick = ()=>openPlayerModal({id:d.id, data:u});
     usersEl.appendChild(row);
   });
