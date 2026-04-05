@@ -21,22 +21,29 @@
 </div>
 
 <script type="module">
-import { auth, db } from './firebase.js';
+import { auth, db, getNetworkErrorMessage } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
 import { doc, getDoc, addDoc, collection, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
 let user = null;
 let profile = null;
+const sendBtn = document.getElementById('send');
+const backBtn = document.getElementById('back');
 
 onAuthStateChanged(auth, async u=>{
   if(!u) return location.href='index.html';
-  user = u;
-  const snap = await getDoc(doc(db,'users',u.uid));
-  profile = snap.exists() ? snap.data() : null;
-  if(!profile || profile.situation!=='verified') return location.href='nick.html';
+  try {
+    user = u;
+    const snap = await getDoc(doc(db,'users',u.uid));
+    profile = snap.exists() ? snap.data() : null;
+    if(!profile || profile.situation!=='verified') return location.href='nick.html';
+  } catch (e) {
+    console.error(e);
+    document.getElementById('msg').textContent = getNetworkErrorMessage(e);
+  }
 });
 
-send.onclick = async ()=>{
+sendBtn.onclick = async ()=>{
   const link = document.getElementById('link').value.trim();
   const text = document.getElementById('text').value.trim();
   const fileUrl = document.getElementById('fileUrl').value.trim();
@@ -50,7 +57,7 @@ send.onclick = async ()=>{
   msg.textContent='Апелляция отправлена.';
 };
 
-back.onclick = ()=> location.href='main.html';
+backBtn.onclick = ()=> location.href='main.html';
 </script>
 </body>
 </html>

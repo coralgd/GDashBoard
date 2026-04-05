@@ -22,10 +22,14 @@ import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from "http
 import { doc, setDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
 const errorEl = document.getElementById('error');
+const emailEl = document.getElementById('email');
+const passwordEl = document.getElementById('password');
+const loginBtn = document.getElementById('login');
+const registerBtn = document.getElementById('register');
 
-login.onclick=()=>{
+loginBtn.onclick=()=>{
   errorEl.textContent = '';
-  signInWithEmailAndPassword(auth,email.value,password.value)
+  signInWithEmailAndPassword(auth, emailEl.value, passwordEl.value)
     .then(()=>location.href='nick.html')
     .catch((e)=>{
       console.error(e);
@@ -33,9 +37,9 @@ login.onclick=()=>{
     });
 };
 
-register.onclick=()=>{
+registerBtn.onclick=()=>{
   errorEl.textContent = '';
-  createUserWithEmailAndPassword(auth,email.value,password.value)
+  createUserWithEmailAndPassword(auth, emailEl.value, passwordEl.value)
     .then(u=>setDoc(doc(db,'users',u.user.uid),{
       role:'player',
       points:0,

@@ -19,9 +19,10 @@
 </div>
 
 <script type="module">
-import { auth, db } from './firebase.js';
+import { auth, db, getNetworkErrorMessage } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
 import { doc, getDoc, collection, getDocs, query, where } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+const backBtn = document.getElementById('back');
 
 function sortByCreatedAtDesc(arr){
   return arr.sort((a,b)=> (b.createdAt?.seconds||0) - (a.createdAt?.seconds||0));
@@ -29,40 +30,45 @@ function sortByCreatedAtDesc(arr){
 
 onAuthStateChanged(auth, async u=>{
   if(!u) return location.href='index.html';
-  const me = await getDoc(doc(db,'users',u.uid));
-  const profile = me.exists() ? me.data() : null;
-  if(!profile || profile.situation!=='verified') return location.href='nick.html';
+  try {
+    const me = await getDoc(doc(db,'users',u.uid));
+    const profile = me.exists() ? me.data() : null;
+    if(!profile || profile.situation!=='verified') return location.href='nick.html';
 
-  const [levelsSnap, compSnap, appealsSnap] = await Promise.all([
-    getDocs(query(collection(db,'level_submissions'), where('authorId','==',u.uid))),
-    getDocs(query(collection(db,'completion_submissions'), where('playerId','==',u.uid))),
-    getDocs(query(collection(db,'appeals'), where('playerId','==',u.uid)))
-  ]);
+    const [levelsSnap, compSnap, appealsSnap] = await Promise.all([
+      getDocs(query(collection(db,'level_submissions'), where('authorId','==',u.uid))),
+      getDocs(query(collection(db,'completion_submissions'), where('playerId','==',u.uid))),
+      getDocs(query(collection(db,'appeals'), where('playerId','==',u.uid)))
+    ]);
 
-  const rows = [];
-  levelsSnap.forEach(d=>rows.push({type:'Уровень', ...d.data()}));
-  compSnap.forEach(d=>rows.push({type:'Прохождение', ...d.data()}));
-  appealsSnap.forEach(d=>rows.push({type:'Апелляция', ...d.data()}));
+    const rows = [];
+    levelsSnap.forEach(d=>rows.push({type:'Уровень', ...d.data()}));
+    compSnap.forEach(d=>rows.push({type:'Прохождение', ...d.data()}));
+    appealsSnap.forEach(d=>rows.push({type:'Апелляция', ...d.data()}));
 
-  const list = document.getElementById('list');
-  const status = document.getElementById('status');
-  const sorted = sortByCreatedAtDesc(rows);
-  status.textContent = '';
+    const list = document.getElementById('list');
+    const status = document.getElementById('status');
+    const sorted = sortByCreatedAtDesc(rows);
+    status.textContent = '';
 
-  if(!sorted.length){
-    status.textContent = 'Пока нет отправок.';
-    return;
+    if(!sorted.length){
+      status.textContent = 'Пока нет отправок.';
+      return;
+    }
+
+    sorted.forEach(x=>{
+      const div = document.createElement('div');
+      div.className='item';
+      div.innerHTML = `<b>${x.type}</b> · ${x.status ?? 'pending'}<br>${x.note ?? ''}`;
+      list.appendChild(div);
+    });
+  } catch (e) {
+    console.error(e);
+    document.getElementById('status').textContent = getNetworkErrorMessage(e);
   }
-
-  sorted.forEach(x=>{
-    const div = document.createElement('div');
-    div.className='item';
-    div.innerHTML = `<b>${x.type}</b> · ${x.status ?? 'pending'}<br>${x.note ?? ''}`;
-    list.appendChild(div);
-  });
 });
 
-back.onclick = ()=> location.href='main.html';
+backBtn.onclick = ()=> location.href='main.html';
 </script>
 </body>
 </html>
