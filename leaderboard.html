@@ -4,12 +4,33 @@
 <meta charset="UTF-8">
 <title>Лидерборд</title>
 <link rel="stylesheet" href="hud.css">
+<style>
+  .panel{display:none}
+  .panel.active{display:block}
+</style>
 </head>
 <body>
 <div class="hud" style="max-width:900px;margin:40px auto;">
   <div class="page-header">
     <h1 style="margin:0;">Лидерборд</h1>
     <button id="back" class="btn-ghost">На главную</button>
+  </div>
+
+  <p id="status" style="color:#00ffff;">Загрузка...</p>
+
+  <div class="top-actions">
+    <button id="showPlayers" class="btn-success">Игроки</button>
+    <button id="showLevels">Лист уровней</button>
+  </div>
+
+  <div id="playersPanel" class="panel active">
+    <div class="row small"><div>#</div><div>Ник</div><div>Очки</div></div>
+    <div id="playersList"></div>
+  </div>
+
+  <div id="levelsPanel" class="panel">
+    <div class="row small"><div>#</div><div>Название</div><div>Ссылка</div></div>
+    <div id="levelsList"></div>
   </div>
 
   <p id="status" style="color:#00ffff;">Загрузка...</p>
@@ -25,7 +46,21 @@ import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/f
 import { collection, getDocs, orderBy, query, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
 const statusEl = document.getElementById('status');
-const listEl = document.getElementById('list');
+const playersList = document.getElementById('playersList');
+const levelsList = document.getElementById('levelsList');
+const playersPanel = document.getElementById('playersPanel');
+const levelsPanel = document.getElementById('levelsPanel');
+
+function setView(name){
+  const players = name === 'players';
+  playersPanel.classList.toggle('active', players);
+  levelsPanel.classList.toggle('active', !players);
+  document.getElementById('showPlayers').classList.toggle('btn-success', players);
+  document.getElementById('showLevels').classList.toggle('btn-success', !players);
+}
+
+document.getElementById('showPlayers').onclick = ()=> setView('players');
+document.getElementById('showLevels').onclick = ()=> setView('levels');
 document.getElementById('back').onclick = ()=> location.href='main.html';
 
 onAuthStateChanged(auth, async user => {
@@ -36,14 +71,14 @@ onAuthStateChanged(auth, async user => {
     const me = meSnap.exists() ? meSnap.data() : null;
     if(!me || me.situation!=='verified') return location.href='nick.html';
 
-    const snap = await getDocs(query(collection(db,'users'), orderBy('points','desc')));
-    listEl.innerHTML = '';
+    const usersSnap = await getDocs(query(collection(db,'users'), orderBy('points','desc')));
+    playersList.innerHTML = '';
 
     let seen = 0;
     let rank = 0;
     let lastPoints = null;
 
-    snap.forEach(d => {
+    usersSnap.forEach(d => {
       const u = d.data();
       if(u.situation !== 'verified') return;
 
@@ -57,15 +92,32 @@ onAuthStateChanged(auth, async user => {
       const row = document.createElement('div');
       row.className = 'row list-item';
       row.innerHTML = `<div>${rank}</div><div>${u.nick ?? 'Без ника'}</div><div>${points}</div>`;
-      listEl.appendChild(row);
+      playersList.appendChild(row);
     });
 
-    if(!listEl.children.length){
+    const levelsSnap = await getDocs(query(collection(db,'levels'), orderBy('rank','asc')));
+    levelsList.innerHTML = '';
+    levelsSnap.forEach(d => {
+      const l = d.data();
+      if(l.status === 'archived') return;
+      const row = document.createElement('div');
+      row.className = 'row list-item';
+      row.innerHTML = `<div>${Number(l.rank ?? 0) || '—'}</div><div>${l.text ?? 'Без названия'}</div><div><a target="_blank" href="${l.link ?? '#'}">Открыть</a></div>`;
+      levelsList.appendChild(row);
+    });
+
+    if(!playersList.children.length){
       statusEl.textContent = 'Нет верифицированных игроков.';
       return;
     }
+    if(!levelsList.children.length){
+      const empty = document.createElement('p');
+      empty.textContent = 'Лист уровней пуст.';
+      levelsList.appendChild(empty);
+    }
 
     statusEl.textContent = '';
+    setView('players');
   } catch (e) {
     statusEl.textContent = getNetworkErrorMessage(e);
   }
