@@ -165,7 +165,7 @@ async function logModeratorAction(action, details = {}){
       details,
       actorUid: me.uid,
       actorNick: me.nick ?? 'moderator',
-      actorRole: 'moderator',
+      actorRole: me.role ?? 'moderator',
       createdAt: serverTimestamp()
     });
   } catch (_) {}
@@ -241,11 +241,7 @@ async function loadPlayers(){
   ]);
 
   usersCache = [];
-  usersSnap.forEach(d=>{
-    const u = d.data();
-    if(u.role==='moderator' || u.role==='elder') return;
-    usersCache.push({id:d.id,...u});
-  });
+  usersSnap.forEach(d=> usersCache.push({id:d.id,...d.data()}));
   usersCache.sort((a,b)=>Number(b.points ?? 0)-Number(a.points ?? 0));
 
   playersPanel.innerHTML = `
@@ -268,7 +264,9 @@ async function loadPlayers(){
       rank = idx + 1;
       const row = document.createElement('div');
       row.className = 'row list-item clickable';
-      row.innerHTML = `<div>${rank}</div><div>${u.nick ?? 'Без ника'}</div><div>${Number(u.points ?? 0)}</div>`;
+      if(u.role==='moderator') row.classList.add('moderator');
+      if(u.role==='elder') row.classList.add('elder');
+      row.innerHTML = `<div>${rank}</div><div>${u.nick ?? 'Без ника'} <span class="small">(${u.role ?? 'player'})</span></div><div>${Number(u.points ?? 0)}</div>`;
       row.onclick = ()=> openPlayerModalForModerator(u.id);
       list.appendChild(row);
     });
@@ -359,7 +357,7 @@ async function openPlayerModalForModerator(playerId){
   document.getElementById('sendModMessage').onclick = async ()=>{
     const text = document.getElementById('modMessageText').value.trim();
     if(!text) return alert('Введите текст сообщения');
-    await addDoc(collection(db,'moderator_messages'), { toUid: playerId, toNick: player.nick ?? 'Без ника', fromUid: me.uid, fromNick: me.nick ?? 'moderator', fromRole:'moderator', text, createdAt: serverTimestamp(), readAt: null });
+    await addDoc(collection(db,'moderator_messages'), { toUid: playerId, toNick: player.nick ?? 'Без ника', fromUid: me.uid, fromNick: me.nick ?? 'moderator', fromRole: me.role ?? 'moderator', text, createdAt: serverTimestamp(), readAt: null });
     await logModeratorAction('send_message_to_player', { toUid: playerId, toNick: player.nick ?? 'Без ника' });
     document.getElementById('modMessageText').value = '';
   };
@@ -524,7 +522,7 @@ onAuthStateChanged(auth, async user => {
     if(data.accountFrozen) return location.href='index.html';
     if(data.role!=='moderator' && data.role!=='elder') return location.href='main.html';
 
-    me = { uid:user.uid, nick:data.nick ?? 'moderator' };
+    me = { uid:user.uid, nick:data.nick ?? 'moderator', role:data.role ?? 'moderator' };
     await Promise.all([loadPlayers(), loadListMenu(), loadScoring()]);
     setPanel('players');
     statusEl.textContent='';

@@ -326,6 +326,8 @@ function renderMainList(){
     const row = document.createElement('div');
     row.className = 'row list-item clickable';
     if(showPlayers){
+      if(item.role==='moderator') row.classList.add('moderator');
+      if(item.role==='elder') row.classList.add('elder');
       row.innerHTML = `<div>${item.rank}</div><div>${item.nick ?? 'Без ника'}</div><div>${Number(item.points ?? 0)}</div>`;
       row.onclick = ()=> openPlayerModal(item.id);
     } else {
