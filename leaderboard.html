@@ -21,23 +21,19 @@
     <button id="showPlayers" class="btn-success">Топ игроков</button>
     <button id="showLevels">Лист уровней</button>
   </div>
-
-  <div id="playersPanel" class="panel active">
-    <div class="toolbar"><input id="search" placeholder="Поиск по нику"></div>
-    <div id="players"></div>
-  </div>
-  <div id="levelsPanel" class="panel">
-    <div id="levels"></div>
-  </div>
-</div>
-
-<div id="infoModal" class="dialog-backdrop">
-  <div class="dialog">
-    <div class="page-header">
-      <h2 id="infoTitle" style="margin:0;">Инфо</h2>
-      <button id="closeInfo" class="btn-ghost">Закрыть</button>
+  <div id="players" class="panel active"><div id="playersList"></div></div>
+  <div id="levels" class="panel"><div id="levelsList"></div></div>
+  <div id="menu" class="panel">
+    <div class="card">
+      <h2 style="margin-top:0;">Меню уровней для игроков</h2>
+      <div class="menu-grid">
+        <button id="goSubmitLevel">Отправить уровень</button>
+        <button id="goSubmitCompletion">Отправить прохождение</button>
+        <button id="goSubmitAppeal">Отправить апелляцию</button>
+        <button id="goMySubmissions">Мои отправки</button>
+      </div>
     </div>
-    <div id="infoBody"></div>
+    
   </div>
   <div id="levelsPanel" class="panel"><div id="levels"></div></div>
 </div>
@@ -47,12 +43,11 @@
 <script type="module">
 import { auth, db, getNetworkErrorMessage } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import { collection, doc, getDoc, getDocs, orderBy, query, where } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+import { collection, query, orderBy, getDocs, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
-const state={users:[],levels:[],comps:[],scoring:{maximumPoints:100,rankDecayFactor:3,repeatPenaltyPower:.5},playersView:true};
-const statusEl=document.getElementById('status');
-const playersPanel=document.getElementById('playersPanel');
-const levelsPanel=document.getElementById('levelsPanel');
+const statusEl = document.getElementById('status');
+const playersList = document.getElementById('playersList');
+const levelsList = document.getElementById('levelsList');
 
 function calc(rank,size,k=1){
   const n=Math.max(2,Number(size||2));
@@ -60,11 +55,24 @@ function calc(rank,size,k=1){
   const x=(r-1)/(n-1);
   return Math.round((state.scoring.maximumPoints*Math.exp(-state.scoring.rankDecayFactor*x)/Math.pow(Math.max(1,k),state.scoring.repeatPenaltyPower))*100)/100;
 }
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
+document.getElementById('backMain').onclick = ()=> location.href='main.html';
+document.getElementById('goSubmitLevel').onclick = ()=> location.href='submit-level.html';
+document.getElementById('goSubmitCompletion').onclick = ()=> location.href='submit-completion.html';
+document.getElementById('goSubmitAppeal').onclick = ()=> location.href='submit-appeal.html';
+document.getElementById('goMySubmissions').onclick = ()=> location.href='my-submissions.html';
+if(location.hash === '#menu') setTab('menu');
+else if(location.hash === '#levels') setTab('levels');
+else setTab('players');
 
-function openInfo(title,html){
-  document.getElementById('infoTitle').textContent=title;
-  document.getElementById('infoBody').innerHTML=html;
-  document.getElementById('infoModal').classList.add('open');
+function renderLevel(levelDoc){
+  const lv = levelDoc.data();
+  if(lv.status === 'archived') return null;
+  const item = document.createElement('div');
+  item.className='item';
+
+  item.innerHTML = `<b>#${lv.rank ?? '—'}</b> · <a target="_blank" href="${lv.link}">Открыть уровень</a><br>${lv.text ?? ''}<br><span class="small">Файл: ${lv.fileUrl || '—'}</span>`;
+  return item;
 }
 
 function renderPlayers(){
@@ -72,26 +80,10 @@ function renderPlayers(){
   const box=document.getElementById('players');
   box.innerHTML='';
 
-  const filtered=state.users.filter(u=>!q || String(u.nick??'').toLowerCase().includes(q));
-  let rowNo=0,rank=0,last=null;
-  filtered.forEach(u=>{
-    rowNo++; if(u.points!==last){rank=rowNo;last=u.points;}
-    const row=document.createElement('div');
-    row.className='row list-item clickable';
-    if(u.role==='moderator') row.classList.add('moderator');
-    if(u.role==='elder') row.classList.add('elder');
-    row.innerHTML=`<div>${rank}</div><div>${u.nick??'Без ника'}</div><div>${Number(u.points??0)}</div>`;
-    row.onclick=()=>{
-      const comps=state.comps.filter(c=>c.playerId===u.id);
-      let html=`<p><b>Почта:</b> ${u.email??'—'}</p><p><b>Роль:</b> ${u.role??'player'}</p><p><b>Очки:</b> ${Number(u.points??0)}</p><h3>Подтвержденные прохождения</h3>`;
-      if(!comps.length) html+='<p>Нет подтвержденных прохождений.</p>';
-      else comps.forEach(c=>{html+=`<div class='row'><div>#${c.listRank??'—'}</div><div>${c.text??'Уровень'}</div><div>${Number(c.awardedPoints??0)}</div></div>`});
-      openInfo(`Игрок: ${u.nick??'Без ника'}`, html);
-    };
-    box.appendChild(row);
-  });
-  if(!filtered.length) box.innerHTML='<p>Игроки не найдены.</p>';
-}
+ try {
+  const meSnap = await getDoc(doc(db,'users',u.uid));
+  const me = meSnap.exists() ? meSnap.data() : null;
+  if(!me || me.situation!=='verified') return location.href='nick.html';
 
 function renderLevels(){
   const box=document.getElementById('levels');
