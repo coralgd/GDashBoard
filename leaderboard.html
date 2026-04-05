@@ -60,7 +60,6 @@ import { auth, db } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
 import { collection, query, orderBy, getDocs, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
-const statusEl = document.getElementById('status');
 const playersList = document.getElementById('playersList');
 const levelsList = document.getElementById('levelsList');
 const statUsers = document.getElementById('statUsers');
@@ -119,6 +118,38 @@ function renderPlayers(){
     if(u.role==='elder') row.classList.add('elder');
     row.innerHTML = `<div>${place}</div><div>${esc(u.nick ?? 'Без ника')}</div><div>${Number(u.points ?? 0)}</div>`;
     playersList.appendChild(row);
+  });
+  statPlayers.textContent = String(usersCache.length);
+  renderPlayers();
+}
+
+  if(!playersList.childElementCount) playersList.innerHTML = '<p>Игроки не найдены.</p>';
+}
+
+function renderLevels(){
+  const q = levelSearch.value.trim().toLowerCase();
+  const sort = levelSort.value;
+  levelsList.innerHTML = '';
+
+  const list = levelsCache
+    .filter(l=>l.status !== 'archived')
+    .filter(l=>`${l.text ?? ''} ${l.link ?? ''}`.toLowerCase().includes(q))
+    .sort((a,b)=> sort==='rankDesc' ? Number(b.rank ?? 999999)-Number(a.rank ?? 999999) : Number(a.rank ?? 999999)-Number(b.rank ?? 999999));
+
+  const quantity = Math.max(2, list.length);
+  list.forEach(l=>{
+    const item = document.createElement('div');
+    item.className='item';
+    const safeLink = normalizeUrl(l.link);
+    const safeFile = normalizeUrl(l.fileUrl);
+    const pts = calculateCompletionPoints(Number(l.rank ?? 1), quantity, 1, scoringCfg);
+    item.innerHTML = `
+      <b>#${Number(l.rank ?? 0) || '—'}</b> · ${safeLink ? `<a href="${safeLink}" target="_blank" rel="noopener noreferrer">Открыть уровень</a>` : '<span class="small">Некорректная ссылка</span>'}
+      <br>${escapeHtml(l.text ?? '')}
+      <br><span class="small">Файл: ${safeFile ? `<a href="${safeFile}" target="_blank" rel="noopener noreferrer">ссылка</a>` : '—'}</span>
+      <br><span class="small">Очки за прохождение: ${pts}</span>
+    `;
+    levelsList.appendChild(item);
   });
 
   if(!playersList.childElementCount) playersList.innerHTML = '<p>Игроки не найдены.</p>';
