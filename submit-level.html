@@ -21,6 +21,8 @@
 
     <input id="link" placeholder="Ссылка на уровень"><br><br>
     <textarea id="text" placeholder="Описание" style="min-height:120px"></textarea><br><br>
+    <input id="builder" placeholder="Строитель уровня"><br><br>
+    <input id="verifier" placeholder="Верифер уровня"><br><br>
     <input id="fileUrl" placeholder="Ссылка на файл (опционально)"><br><br>
 
     <label class="small">Сослаться на прошлую отправку (опц.)</label>
@@ -75,14 +77,16 @@ document.getElementById('levelSearch').oninput=renderLevels;
 document.getElementById('send').onclick=async()=>{
   const link=document.getElementById('link').value.trim();
   const text=document.getElementById('text').value.trim();
+  const builder=document.getElementById('builder').value.trim();
+  const verifier=document.getElementById('verifier').value.trim();
   const fileUrl=document.getElementById('fileUrl').value.trim();
   const referenceSubmissionId=document.getElementById('ref').value||'';
   const msg=document.getElementById('msg');
-  if(!link||!text){ msg.textContent='Нужны ссылка и текст'; return; }
+  if(!link||!text||!builder||!verifier){ msg.textContent='Нужны ссылка, текст, строитель и верифер'; return; }
 
   try{
     await addDoc(collection(db,'level_submissions'),{
-      authorId:user.uid,nick:profile.nick ?? 'Без ника',link,text,fileUrl,referenceSubmissionId,
+      authorId:user.uid,nick:profile.nick ?? 'Без ника',link,text,builder,verifier,fileUrl,referenceSubmissionId,
       relatedLevelId:selectedLevel?.id ?? '', relatedLevelRank:Number(selectedLevel?.rank ?? 0) || null,
       status:'pending',note:'',createdAt:serverTimestamp()
     });
