@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>Leaderboard</title>
+<title>Лидерборд</title>
 <link rel="stylesheet" href="hud.css">
 <style>
   .panel{display:none}
@@ -11,11 +11,10 @@
 </style>
 </head>
 <body>
-
-<div class="hud" style="max-width:1000px;margin:40px auto;">
+<div class="hud" style="max-width:1120px;margin:30px auto;">
   <div class="page-header">
-    <h1 style="margin:0;">Лидерборд и лист</h1>
-    <button id="backMain" class="btn-ghost">На главную</button>
+    <h1 style="margin:0;">Лидерборд</h1>
+    <button id="back" class="btn-ghost">На главную</button>
   </div>
   <p id="status" style="margin:8px 0 14px;color:#00ffff;">Загрузка...</p>
 
@@ -27,6 +26,8 @@
   <div id="players" class="panel active"><div id="playersList"></div></div>
   <div id="levels" class="panel"><div id="levelsList"></div></div>
 </div>
+
+<div id="modal" class="dialog-backdrop"><div class="dialog"><div class="page-header"><h2 id="mTitle">Инфо</h2><button id="mClose" class="btn-ghost">Закрыть</button></div><div id="mBody"></div></div></div>
 
 <script type="module">
 import { auth, db, getNetworkErrorMessage } from './firebase.js';
