@@ -27,6 +27,8 @@ import { doc, getDoc, addDoc, collection, serverTimestamp } from "https://www.gs
 
 let user = null;
 let profile = null;
+const sendBtn = document.getElementById('send');
+const backBtn = document.getElementById('back');
 
 onAuthStateChanged(auth, async u=>{
   if(!u) return location.href='index.html';
@@ -41,7 +43,7 @@ onAuthStateChanged(auth, async u=>{
   }
 });
 
-send.onclick = async ()=>{
+sendBtn.onclick = async ()=>{
   const link = document.getElementById('link').value.trim();
   const text = document.getElementById('text').value.trim();
   const fileUrl = document.getElementById('fileUrl').value.trim();
@@ -55,7 +57,7 @@ send.onclick = async ()=>{
   msg.textContent='Заявка отправлена модераторам.';
 };
 
-back.onclick = ()=> location.href='main.html';
+backBtn.onclick = ()=> location.href='main.html';
 </script>
 </body>
 </html>

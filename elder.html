@@ -27,6 +27,13 @@
     <button id="clearMods" class="btn-danger">Очистить историю отправок у всех модеров</button>
   </div>
 
+  <div class="top-actions">
+    <button id="goElderLevels" class="btn-hero">Меню листа</button>
+    <button id="tabUsers" class="btn-success">Игроки</button>
+    <button id="tabDeleting">Удаляемые</button>
+    <button id="clearMods" class="btn-danger">Очистить историю отправок у всех модеров</button>
+  </div>
+
   <div id="usersPanel" class="panel active">
     <h2>Игроки</h2>
     <div class="row small"><div>#</div><div>Ник</div><div>Очки</div></div>
@@ -177,6 +184,7 @@ async function cancelDeleteAccount(userId){
     deletionRequestedAt: null,
     deletionExecuteAt: null
   });
+}
 
 async function processExpiredDeletes(){
   const now = Date.now();
@@ -418,13 +426,13 @@ async function loadUsers(){
   renderDeletingList();
 }
 
-onAuthStateChanged(auth, async user => {
+onAuthStateChanged(auth, async user=>{
   if(!user) return location.href='index.html';
   try {
     const meSnap = await getDoc(doc(db,'users',user.uid));
     const me = meSnap.exists() ? meSnap.data() : null;
-    if(!me || me.situation !== 'verified') return location.href='nick.html';
-    if(me.role !== 'elder') return location.href='main.html';
+    if(!me || me.situation!=='verified') return location.href='nick.html';
+    if(me.role!=='elder') return location.href='main.html';
 
     await loadUsers();
     statusEl.textContent = '';
