@@ -44,13 +44,25 @@
   </div>
 </div>
 
+<div id="levelModal" class="dialog-backdrop">
+  <div class="dialog">
+    <div class="page-header">
+      <h2 id="levelModalTitle" style="margin:0;">Уровень</h2>
+      <button id="closeLevelModal" class="btn-ghost">Закрыть</button>
+    </div>
+    <div id="levelModalBody"></div>
+  </div>
+</div>
+
 <script type="module">
 import { auth, db } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
 import { collection, query, where, orderBy, getDocs, doc, updateDoc, getDoc, addDoc, deleteDoc, serverTimestamp, setDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
 const statusEl = document.getElementById('status');
+const levelModal = document.getElementById('levelModal');
 document.getElementById('back').onclick = ()=> location.href='elder.html';
+document.getElementById('closeLevelModal').onclick = ()=> levelModal.classList.remove('open');
 
 function setTab(id){
   document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
@@ -269,35 +281,45 @@ async function loadLevelsManage(elder){
     const levelPoints = calculateCompletionPoints(Number(lv.rank ?? 1), quantity, 1, scoreCfg);
     const row = document.createElement('div');
     row.className='row';
+    row.style.cursor = 'pointer';
     row.innerHTML = `
       <b>#${lv.rank ?? '—'}</b><br>
-      <a href="${lv.link}" target="_blank">Ссылка</a>
+      <a href="${lv.link}" target="_blank" onclick="event.stopPropagation()">Ссылка</a>
       <p class="small">Очки за прохождение: ${levelPoints}</p>
-      <textarea class="text">${lv.text ?? ''}</textarea>
-      <input class="link" value="${lv.link ?? ''}" placeholder="Ссылка">
-      <input class="file" value="${lv.fileUrl ?? ''}" placeholder="Файл">
-      <input class="rank" type="number" min="1" value="${lv.rank ?? 1}" placeholder="Место">
-      <div class="top-actions">
-        <button class="save">Сохранить изменения</button>
-        <button class="delete btn-danger">Удалить уровень</button>
-      </div>
+      <p>${lv.text ?? ''}</p>
     `;
     box.appendChild(row);
 
-    row.querySelector('.save').onclick = async ()=>{
-      const rank = Number(row.querySelector('.rank').value);
-      const link = row.querySelector('.link').value.trim();
-      const text = row.querySelector('.text').value.trim();
-      const fileUrl = row.querySelector('.file').value.trim();
-      if(!rank || !link){ alert('Нужны место и ссылка'); return; }
-      await updateDoc(doc(db,'levels',lv.id), { rank, link, text, fileUrl, updatedBy:elder.uid, updatedAt:serverTimestamp() });
-      row.style.outline = '1px solid rgba(32,245,204,.7)';
-    };
-
-    row.querySelector('.delete').onclick = async ()=>{
-      if(!confirm('Удалить уровень из листа?')) return;
-      await deleteDoc(doc(db,'levels',lv.id));
-      row.remove();
+    row.onclick = ()=>{
+      document.getElementById('levelModalTitle').textContent = `Уровень #${lv.rank ?? '—'}`;
+      const body = document.getElementById('levelModalBody');
+      body.innerHTML = `
+        <textarea id="modalLevelText">${lv.text ?? ''}</textarea>
+        <input id="modalLevelLink" value="${lv.link ?? ''}" placeholder="Ссылка">
+        <input id="modalLevelFile" value="${lv.fileUrl ?? ''}" placeholder="Файл">
+        <input id="modalLevelRank" type="number" min="1" value="${lv.rank ?? 1}" placeholder="Место">
+        <div class="top-actions">
+          <button id="saveLevelModal">Сохранить</button>
+          <button id="deleteLevelModal" class="btn-danger">Удалить</button>
+        </div>
+      `;
+      document.getElementById('saveLevelModal').onclick = async ()=>{
+        const rank = Number(document.getElementById('modalLevelRank').value);
+        const link = document.getElementById('modalLevelLink').value.trim();
+        const text = document.getElementById('modalLevelText').value.trim();
+        const fileUrl = document.getElementById('modalLevelFile').value.trim();
+        if(!rank || !link){ alert('Нужны место и ссылка'); return; }
+        await updateDoc(doc(db,'levels',lv.id), { rank, link, text, fileUrl, updatedBy:elder.uid, updatedAt:serverTimestamp() });
+        levelModal.classList.remove('open');
+        await loadLevelsManage(elder);
+      };
+      document.getElementById('deleteLevelModal').onclick = async ()=>{
+        if(!confirm('Удалить уровень из листа?')) return;
+        await deleteDoc(doc(db,'levels',lv.id));
+        levelModal.classList.remove('open');
+        await loadLevelsManage(elder);
+      };
+      levelModal.classList.add('open');
     };
   });
 }

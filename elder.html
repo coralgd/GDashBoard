@@ -5,10 +5,8 @@
 <title>Старший модератор</title>
 <link rel="stylesheet" href="hud.css">
 <style>
-  .panel{display:none;margin-top:14px}
-  .panel.active{display:block}
-  .row{border:1px solid #2d8cff55;background:rgba(0,20,50,.35);padding:10px;border-radius:8px;margin-bottom:10px}
-  .row input{width:100%;margin:6px 0}
+  .user-card{cursor:pointer}
+  .user-card:hover{outline:1px solid rgba(32,245,204,.7)}
 </style>
 </head>
 <body>
@@ -20,61 +18,118 @@
   <p id="status" style="color:#00ffff;">Загрузка...</p>
 
   <div class="top-actions">
-    <button id="goElderLevels" class="btn-hero">Меню уровней старшего модератора</button>
+    <button id="goElderLevels" class="btn-hero">Меню листа</button>
   </div>
 
-  <div class="tabs">
-    <button data-tab="users">Пользователи</button>
-  </div>
+  <h2>Игроки</h2>
+  <div id="users"></div>
+</div>
 
-  <div id="users" class="panel active"></div>
+<div id="playerModal" class="dialog-backdrop">
+  <div class="dialog">
+    <div class="page-header">
+      <h2 id="playerModalTitle" style="margin:0;">Игрок</h2>
+      <button id="closePlayerModal" class="btn-ghost">Закрыть</button>
+    </div>
+    <div class="tabs" style="grid-template-columns:repeat(3,minmax(0,1fr));">
+      <button data-player-tab="profile">Профиль</button>
+      <button data-player-tab="submissions">Отправки</button>
+      <button data-player-tab="approved">Успешные</button>
+    </div>
+    <div id="playerTabProfile" class="panel active"></div>
+    <div id="playerTabSubmissions" class="panel"></div>
+    <div id="playerTabApproved" class="panel"></div>
+  </div>
 </div>
 
 <script type="module">
 import { auth, db } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import { collection, query, orderBy, getDocs, doc, updateDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+import { collection, query, orderBy, where, getDocs, doc, updateDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
 const statusEl = document.getElementById('status');
+const usersEl = document.getElementById('users');
+const modal = document.getElementById('playerModal');
+let meUid = null;
 
 document.getElementById('backMain').onclick = ()=> location.href='main.html';
 document.getElementById('goElderLevels').onclick = ()=> location.href='elder-levels.html';
+document.getElementById('closePlayerModal').onclick = ()=> modal.classList.remove('open');
+
+document.querySelectorAll('[data-player-tab]').forEach(btn=>btn.onclick=()=>{
+  document.querySelectorAll('#playerModal .panel').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('[data-player-tab]').forEach(b=>b.classList.remove('active'));
+  document.getElementById(`playerTab${btn.dataset.playerTab[0].toUpperCase()}${btn.dataset.playerTab.slice(1)}`).classList.add('active');
+  btn.classList.add('active');
+});
+document.querySelector('[data-player-tab="profile"]').classList.add('active');
+
+async function openPlayerModal(userDoc){
+  const { id, data } = userDoc;
+  document.getElementById('playerModalTitle').textContent = data.nick ?? 'Игрок';
+  const profile = document.getElementById('playerTabProfile');
+  const submissions = document.getElementById('playerTabSubmissions');
+  const approved = document.getElementById('playerTabApproved');
+
+  profile.innerHTML = `
+    <p><b>Роль:</b> ${data.role ?? 'player'}</p>
+    <p><b>Верификация:</b> ${data.situation ?? 'not requested'}</p>
+    <input id="modalPoints" type="number" value="${Number(data.points ?? 0)}" placeholder="Очки">
+    <div class="top-actions">
+      <button id="savePoints">Сохранить очки</button>
+      <button id="toggleRole">${data.role==='moderator' ? 'Снять модерку' : 'Назначить модером'}</button>
+      <button id="toggleVer">${data.situation==='verified' ? 'Снять верифку' : 'Верифицировать'}</button>
+    </div>
+  `;
+
+  document.getElementById('savePoints').onclick = async ()=>{
+    await updateDoc(doc(db,'users',id), { points:Number(document.getElementById('modalPoints').value) });
+  };
+  document.getElementById('toggleRole').onclick = async ()=>{
+    const newRole = data.role==='moderator' ? 'player' : 'moderator';
+    await updateDoc(doc(db,'users',id), { role:newRole });
+    data.role = newRole;
+    document.getElementById('toggleRole').textContent = data.role==='moderator' ? 'Снять модерку' : 'Назначить модером';
+  };
+  document.getElementById('toggleVer').onclick = async ()=>{
+    const newSit = data.situation==='verified' ? 'not requested' : 'verified';
+    await updateDoc(doc(db,'users',id), { situation:newSit });
+    data.situation = newSit;
+    document.getElementById('toggleVer').textContent = data.situation==='verified' ? 'Снять верифку' : 'Верифицировать';
+  };
+
+  const [levelSubs, compSubs] = await Promise.all([
+    getDocs(query(collection(db,'level_submissions'), where('authorId','==',id))),
+    getDocs(query(collection(db,'completion_submissions'), where('playerId','==',id)))
+  ]);
+
+  const all = [];
+  levelSubs.forEach(d=>all.push({type:'Уровень', status:d.data().status ?? '—', text:d.data().text ?? ''}));
+  compSubs.forEach(d=>all.push({type:'Прохождение', status:d.data().status ?? '—', text:d.data().text ?? ''}));
+  submissions.innerHTML = all.length ? all.map(x=>`<div class="row"><b>${x.type}</b> · ${x.status}<br>${x.text}</div>`).join('') : '<p>Нет отправок.</p>';
+
+  const approvedItems = [];
+  compSubs.forEach(d=>{ if(d.data().status==='approved') approvedItems.push(d.data()); });
+  approved.innerHTML = approvedItems.length
+    ? approvedItems.map(x=>`<div class="row"><b>+${Number(x.awardedPoints ?? 0)} очков</b><br>${x.text ?? ''}</div>`).join('')
+    : '<p>Нет успешных прохождений.</p>';
+
+  modal.classList.add('open');
+}
 
 async function loadUsers(){
-  const box = document.getElementById('users');
-  box.innerHTML = 'Загрузка пользователей...';
+  usersEl.innerHTML = 'Загрузка...';
   const snap = await getDocs(query(collection(db,'users'), orderBy('points','desc')));
-  if(snap.empty){ box.innerHTML='<p>Нет пользователей.</p>'; return; }
+  if(snap.empty){ usersEl.innerHTML = '<p>Нет пользователей.</p>'; return; }
 
-  box.innerHTML='';
+  usersEl.innerHTML = '';
   snap.forEach(d=>{
     const u = d.data();
     const row = document.createElement('div');
-    row.className='row';
-    row.innerHTML = `
-      <b>${u.nick ?? 'Без ника'}</b> · роль: ${u.role ?? 'player'} · вериф: ${u.situation ?? 'not requested'}<br>
-      <input type="number" value="${u.points ?? 0}" class="points">
-      <button class="savePoints">Сохранить баллы</button>
-      <button class="toggleRole">${u.role==='moderator'?'Снять модерку':'Назначить модером'}</button>
-      <button class="toggleVer">${u.situation==='verified'?'Снять верификацию':'Верифицировать'}</button>
-    `;
-    box.appendChild(row);
-
-    row.querySelector('.savePoints').onclick = async ()=>{
-      await updateDoc(doc(db,'users',d.id), { points:Number(row.querySelector('.points').value) });
-    };
-    row.querySelector('.toggleRole').onclick = async ()=>{
-      const newRole = u.role==='moderator' ? 'player' : 'moderator';
-      await updateDoc(doc(db,'users',d.id), { role:newRole });
-      u.role = newRole;
-      row.querySelector('.toggleRole').textContent = u.role==='moderator'?'Снять модерку':'Назначить модером';
-    };
-    row.querySelector('.toggleVer').onclick = async ()=>{
-      const newSit = u.situation==='verified' ? 'not requested' : 'verified';
-      await updateDoc(doc(db,'users',d.id), { situation:newSit });
-      u.situation = newSit;
-      row.querySelector('.toggleVer').textContent = u.situation==='verified'?'Снять верификацию':'Верифицировать';
-    };
+    row.className = 'row user-card';
+    row.innerHTML = `<b>${u.nick ?? 'Без ника'}</b> · ${u.role ?? 'player'} · ${u.situation ?? 'not requested'}<br><span class="small">Очки: ${Number(u.points ?? 0)}</span>`;
+    row.onclick = ()=>openPlayerModal({id:d.id, data:u});
+    usersEl.appendChild(row);
   });
 }
 
@@ -85,6 +140,7 @@ onAuthStateChanged(auth, async user=>{
     const me = meSnap.exists() ? meSnap.data() : null;
     if(!me || me.situation!=='verified') return location.href='nick.html';
     if(me.role!=='elder') return location.href='main.html';
+    meUid = user.uid;
 
     await loadUsers();
     statusEl.textContent = '';
