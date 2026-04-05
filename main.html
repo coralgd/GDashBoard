@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
@@ -6,27 +6,25 @@
 <link rel="stylesheet" href="hud.css">
 </head>
 <body>
-<div class="hud" style="max-width:860px;margin:48px auto;text-align:center;">
-  <div class="page-header" style="justify-content:center;">
-    <h1 style="margin:0;">Главная панель</h1>
-  </div>
-  <p id="status" style="color:#00ffff;">Загрузка профиля...</p>
+<div class="hud" style="max-width:860px;text-align:center;">
+  <h1>GDashBoard V3</h1>
+  <p id="status" style="color:#00e5ff">Загрузка...</p>
 
-  <div class="stats-grid" style="margin:14px 0;">
-    <div class="stat"><div class="small">Ник</div><div id="nick">—</div></div>
-    <div class="stat"><div class="small">Очки</div><div id="points">0</div></div>
-    <div class="stat"><div class="small">Место</div><div id="place">—</div></div>
-    <div class="stat"><div class="small">Роль</div><div id="role">player</div></div>
+  <div class="list-item">
+    <p id="nick">Ник: —</p>
+    <p id="points">Очки: 0</p>
+    <p id="place">Место: —</p>
+    <p id="role">Роль: player</p>
   </div>
 
-  <div class="top-actions" style="justify-content:center;">
+  <div class="top-actions" style="justify-content:center">
     <button id="goBoard" class="btn-hero">Лидерборд и лист</button>
     <button id="goLevels" class="btn-hero">Меню уровней</button>
-    <button id="goModeration" class="btn-hero">Панель модерации</button>
+    <button id="goMod" class="btn-hero">Модерация</button>
   </div>
 
-  <p id="warn" style="color:#ff8fa8;"></p>
-  <p class="small" id="version" style="margin-top:18px;"></p>
+  <p id="err" style="color:#ff8ba8"></p>
+  <p id="version" class="small"></p>
 </div>
 
 <script type="module">
@@ -34,59 +32,43 @@ import { auth, db, getNetworkErrorMessage } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
 import { collection, doc, getDoc, getDocs, orderBy, query } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
-const APP_VERSION = 'V3.1 hotfix · 2026-04-05';
+const APP_VERSION = 'V3 FINAL · 2026-04-05';
 document.getElementById('version').textContent = `Версия: ${APP_VERSION}`;
 
-const statusEl = document.getElementById('status');
-const nickEl = document.getElementById('nick');
-const pointsEl = document.getElementById('points');
-const placeEl = document.getElementById('place');
-const roleEl = document.getElementById('role');
-const warnEl = document.getElementById('warn');
-
-function routeByRole(role){
-  if(role === 'elder') return 'elder.html';
-  if(role === 'moderator') return 'moderator.html';
-  return '';
-}
-
 onAuthStateChanged(auth, async user => {
-  if(!user) return location.href = 'index.html';
+  if(!user) return location.href='index.html';
   try {
-    const meSnap = await getDoc(doc(db, 'users', user.uid));
+    const meSnap = await getDoc(doc(db,'users',user.uid));
     const me = meSnap.exists() ? meSnap.data() : null;
-    if(!me || me.situation !== 'verified') return location.href = 'nick.html';
+    if(!me || me.situation !== 'verified') return location.href='nick.html';
 
-    nickEl.textContent = me.nick ?? 'Без ника';
-    pointsEl.textContent = String(Number(me.points ?? 0));
-    roleEl.textContent = me.role ?? 'player';
+    document.getElementById('nick').textContent = `Ник: ${me.nick ?? '—'}`;
+    document.getElementById('points').textContent = `Очки: ${Number(me.points ?? 0)}`;
+    document.getElementById('role').textContent = `Роль: ${me.role ?? 'player'}`;
 
-    const usersSnap = await getDocs(query(collection(db,'users'), orderBy('points','desc')));
-    let i = 0;
-    let rank = 0;
-    let place = '—';
-    let last = null;
-    usersSnap.forEach(d => {
-      const u = d.data();
-      if(u.situation !== 'verified') return;
+    const all = await getDocs(query(collection(db,'users'), orderBy('points','desc')));
+    let i=0, rank=0, prev=null, place='—';
+    all.forEach(d=>{
+      const u=d.data();
+      if(u.situation!=='verified') return;
       i++;
-      if(u.points !== last){ rank = i; last = u.points; }
-      if(d.id === user.uid) place = String(rank);
+      if(u.points!==prev){rank=i;prev=u.points;}
+      if(d.id===user.uid) place=String(rank);
     });
-    placeEl.textContent = place;
+    document.getElementById('place').textContent = `Место: ${place}`;
 
-    document.getElementById('goBoard').onclick = () => location.href = 'leaderboard.html';
-    document.getElementById('goLevels').onclick = () => location.href = 'levels-menu.html';
-    document.getElementById('goModeration').onclick = () => {
-      const to = routeByRole(me.role);
-      if(!to){ warnEl.textContent = 'У тебя нет роли модератора.'; return; }
-      location.href = to;
+    document.getElementById('goBoard').onclick = ()=>location.href='leaderboard.html';
+    document.getElementById('goLevels').onclick = ()=>location.href='levels-menu.html';
+    document.getElementById('goMod').onclick = ()=>{
+      if(me.role==='elder') return location.href='elder.html';
+      if(me.role==='moderator') return location.href='moderator.html';
+      document.getElementById('err').textContent = 'У тебя нет модераторской роли.';
     };
 
-    statusEl.textContent = '';
-  } catch (error) {
-    console.error(error);
-    statusEl.textContent = getNetworkErrorMessage(error);
+    document.getElementById('status').textContent='';
+  } catch (e) {
+    console.error(e);
+    document.getElementById('status').textContent = getNetworkErrorMessage(e);
   }
 });
 </script>
