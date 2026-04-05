@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Меню листа старшего модератора</title>
+<link rel="stylesheet" href="hud.css">
+<style>
+  .layout{display:grid;grid-template-columns:1fr 240px;gap:12px}
+  .level-card{cursor:pointer}
+  .level-card:hover{outline:1px solid rgba(32,245,204,.7)}
+  .side{position:sticky;top:16px;align-self:start}
+</style>
+</head>
+<body>
+<div class="hud" style="max-width:1200px;margin:30px auto;">
+  <div class="page-header">
+    <h1 style="margin:0;">Меню листа старшего модератора</h1>
+    <button id="back" class="btn-ghost">Назад</button>
+  </div>
+  <p id="status" style="color:#00ffff;">Загрузка...</p>
+
+  <div class="layout">
+    <div>
+      <h2 style="margin-top:0;">Актуальный лист уровней</h2>
+      <div id="levelsList"></div>
+    </div>
+    <div class="side card">
+      <h3 style="margin-top:0;">Действия</h3>
+      <div class="top-actions" style="flex-direction:column;">
+        <button id="openSettings">Изменить параметры</button>
+        <button id="openSubmissions">Отправки</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="levelModal" class="dialog-backdrop">
+  <div class="dialog">
+    <div class="page-header">
+      <h2 id="levelModalTitle" style="margin:0;">Уровень</h2>
+      <button id="closeLevelModal" class="btn-ghost">Закрыть</button>
+    </div>
+    <div id="levelModalBody"></div>
+  </div>
+</div>
+
+<div id="settingsModal" class="dialog-backdrop">
+  <div class="dialog">
+    <div class="page-header">
+      <h2 style="margin:0;">Параметры формулы</h2>
+      <button id="closeSettingsModal" class="btn-ghost">Закрыть</button>
+    </div>
+    <input id="maximumPoints" type="number" step="1" min="1" placeholder="maximumPoints">
+    <input id="rankDecayFactor" type="number" step="0.1" min="0" placeholder="rankDecayFactor">
+    <input id="repeatPenaltyPower" type="number" step="0.01" min="0" placeholder="repeatPenaltyPower">
+    <p class="small">points = maximumPoints * e^(-rankDecayFactor*x) * 1/(k^repeatPenaltyPower)</p>
+    <button id="saveSettings">Сохранить параметры</button>
+    <p id="settingsMsg" class="small"></p>
+  </div>
+</div>
+
+<div id="submissionsModal" class="dialog-backdrop">
+  <div class="dialog" style="width:min(980px,95vw)">
+    <div class="page-header">
+      <h2 style="margin:0;">Все отправки</h2>
+      <button id="closeSubmissionsModal" class="btn-ghost">Закрыть</button>
+    </div>
+    <div class="toolbar">
+      <input id="submissionSearch" placeholder="Поиск по нику/тексту">
+      <select id="submissionTypeFilter">
+        <option value="all">Все типы</option>
+        <option value="level">Уровни</option>
+        <option value="completion">Прохождения</option>
+        <option value="appeal">Апелляции</option>
+      </select>
+    </div>
+    <div id="submissionsList"></div>
+    <div id="submissionDetail" style="margin-top:10px;"></div>
+  </div>
+</div>
+
+<script type="module">
+import { auth, db } from './firebase.js';
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
+import { collection, query, where, orderBy, getDocs, doc, updateDoc, getDoc, addDoc, deleteDoc, serverTimestamp, setDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+
+const statusEl = document.getElementById('status');
+const levelsList = document.getElementById('levelsList');
+let currentElder = null;
+let allSubmissions = [];
+let levelsCache = [];
+let scoringCfg = { maximumPoints:100, rankDecayFactor:3, repeatPenaltyPower:0.5 };
+
+document.getElementById('back').onclick = ()=> location.href='elder.html';
+
+const levelModal = document.getElementById('levelModal');
+const settingsModal = document.getElementById('settingsModal');
+const submissionsModal = document.getElementById('submissionsModal');
+document.getElementById('closeLevelModal').onclick = ()=> levelModal.classList.remove('open');
+document.getElementById('closeSettingsModal').onclick = ()=> settingsModal.classList.remove('open');
+document.getElementById('closeSubmissionsModal').onclick = ()=> submissionsModal.classList.remove('open');
+document.getElementById('openSettings').onclick = ()=> settingsModal.classList.add('open');
+document.getElementById('openSubmissions').onclick = ()=> submissionsModal.classList.add('open');
+
+document.getElementById('submissionSearch').oninput = ()=>renderSubmissionsList();
+document.getElementById('submissionTypeFilter').onchange = ()=>renderSubmissionsList();
+
+function calculateCompletionPoints(rank,size,k,s){
+  const normalizedListSize = Math.max(2, Number(size || 2));
+  const normalizedRank = Math.max(1, Math.min(Number(rank || 1), normalizedListSize));
+  const x = (normalizedRank - 1) / (normalizedListSize - 1);
+  return Math.round((s.maximumPoints * Math.exp(-s.rankDecayFactor * x) / Math.pow(Math.max(1, k), s.repeatPenaltyPower)) * 100) / 100;
+}
+
+async function placeLevelAtRank(levelId, targetRank){
+  const snap = await getDocs(query(collection(db,'levels'), orderBy('rank','asc')));
+  const levels = [];
+  snap.forEach(d=>{ const v=d.data(); if(v.status!=='archived') levels.push({id:d.id, ...v}); });
+  const moved = levels.find(x=>x.id===levelId);
+  if(!moved) return;
+
+  const without = levels.filter(x=>x.id!==levelId);
+  let index = Number(targetRank) - 1;
+  if(index < 0) index = 0;
+  if(index > without.length) index = without.length;
+  without.splice(index, 0, moved);
+
+  for(let i=0;i<without.length;i++){
+    const nextRank = i + 1;
+    if(Number(without[i].rank) !== nextRank){
+      await updateDoc(doc(db,'levels',without[i].id), { rank:nextRank });
+    }
+  }
+}
+
+async function recalcApprovedCompletions(){
+  const [levelsSnap, compsSnap] = await Promise.all([
+    getDocs(query(collection(db,'levels'), orderBy('rank','asc'))),
+    getDocs(query(collection(db,'completion_submissions'), where('status','==','approved')))
+  ]);
+  const rankByLevelId = new Map();
+  let quantity = 0;
+  levelsSnap.forEach(d=>{ const lv=d.data(); if(lv.status!=='archived'){ rankByLevelId.set(d.id, Number(lv.rank ?? 0)); quantity++; } });
+  quantity = Math.max(quantity, 2);
+
+  const byPlayer = new Map();
+  compsSnap.forEach(d=>{
+    const v = d.data();
+    if(!byPlayer.has(v.playerId)) byPlayer.set(v.playerId, []);
+    byPlayer.get(v.playerId).push({ id:d.id, ...v });
+  });
+
+  for(const [playerId, items] of byPlayer.entries()){
+    items.sort((a,b)=> (a.reviewedAt?.seconds ?? 0) - (b.reviewedAt?.seconds ?? 0));
+    let sum = 0;
+    for(let i=0;i<items.length;i++){
+      const it = items[i];
+      const rank = rankByLevelId.get(it.levelId) ?? Number(it.listRank ?? 1);
+      const earned = calculateCompletionPoints(rank, quantity, i + 1, scoringCfg);
+      sum += earned;
+      await updateDoc(doc(db,'completion_submissions',it.id), {
+        awardedPoints:earned, listRank:rank, listQuantity:quantity, scoreK:i+1
+      });
+    }
+    await updateDoc(doc(db,'users',playerId), { points: Math.round(sum * 100) / 100 });
+  }
+}
+
+async function loadScoring(){
+  const snap = await getDoc(doc(db,'settings','scoring'));
+  const s = snap.exists() ? snap.data() : {};
+  scoringCfg = {
+    maximumPoints: Number(s.maximumPoints ?? s.maxPoints ?? 100),
+    rankDecayFactor: Number(s.rankDecayFactor ?? s.decayA ?? 3),
+    repeatPenaltyPower: Number(s.repeatPenaltyPower ?? s.grindPower ?? 0.5)
+  };
+  document.getElementById('maximumPoints').value = scoringCfg.maximumPoints;
+  document.getElementById('rankDecayFactor').value = scoringCfg.rankDecayFactor;
+  document.getElementById('repeatPenaltyPower').value = scoringCfg.repeatPenaltyPower;
+}
+
+document.getElementById('saveSettings').onclick = async ()=>{
+  const maximumPoints = Number(document.getElementById('maximumPoints').value);
+  const rankDecayFactor = Number(document.getElementById('rankDecayFactor').value);
+  const repeatPenaltyPower = Number(document.getElementById('repeatPenaltyPower').value);
+  await setDoc(doc(db,'settings','scoring'), {
+    maximumPoints, rankDecayFactor, repeatPenaltyPower,
+    maxPoints: maximumPoints, decayA: rankDecayFactor, grindPower: repeatPenaltyPower,
+    updatedBy: currentElder.uid, updatedAt: serverTimestamp()
+  }, { merge:true });
+  document.getElementById('settingsMsg').textContent = 'Параметры сохранены.';
+  await loadScoring();
+  await recalcApprovedCompletions();
+  await renderLevels();
+};
+
+async function renderLevels(){
+  levelsList.innerHTML = 'Загрузка листа...';
+  const snap = await getDocs(query(collection(db,'levels'), orderBy('rank','asc')));
+  levelsCache = [];
+  snap.forEach(d=>{ const lv=d.data(); if(lv.status!=='archived') levelsCache.push({id:d.id, ...lv}); });
+  const quantity = Math.max(levelsCache.length,2);
+
+  if(!levelsCache.length){ levelsList.innerHTML = '<p>Лист пуст.</p>'; return; }
+  levelsList.innerHTML = '';
+  levelsCache.forEach(lv=>{
+    const points = calculateCompletionPoints(Number(lv.rank ?? 1), quantity, 1, scoringCfg);
+    const card = document.createElement('div');
+    card.className = 'row level-card';
+    card.innerHTML = `<b>#${lv.rank ?? '—'}</b> · <a href="${lv.link}" target="_blank" onclick="event.stopPropagation()">Ссылка</a><br>${lv.text ?? ''}<br><span class="small">Очки: ${points}</span>`;
+    card.onclick = ()=>openLevelModal(lv);
+    levelsList.appendChild(card);
+  });
+}
+
+function openLevelModal(lv){
+  document.getElementById('levelModalTitle').textContent = `Уровень #${lv.rank ?? '—'}`;
+  document.getElementById('levelModalBody').innerHTML = `
+    <textarea id="modalLevelText">${lv.text ?? ''}</textarea>
+    <input id="modalLevelLink" value="${lv.link ?? ''}" placeholder="Ссылка">
+    <input id="modalLevelFile" value="${lv.fileUrl ?? ''}" placeholder="Файл">
+    <input id="modalLevelRank" type="number" min="1" value="${lv.rank ?? 1}" placeholder="Место">
+    <div class="top-actions">
+      <button id="saveLevel">Сохранить</button>
+      <button id="deleteLevel" class="btn-danger">Удалить</button>
+    </div>
+  `;
+  document.getElementById('saveLevel').onclick = async ()=>{
+    const newRank = Number(document.getElementById('modalLevelRank').value);
+    await updateDoc(doc(db,'levels',lv.id), {
+      rank:newRank,
+      link:document.getElementById('modalLevelLink').value.trim(),
+      text:document.getElementById('modalLevelText').value.trim(),
+      fileUrl:document.getElementById('modalLevelFile').value.trim(),
+      updatedBy: currentElder.uid, updatedAt: serverTimestamp()
+    });
+    await placeLevelAtRank(lv.id, newRank);
+    await recalcApprovedCompletions();
+    levelModal.classList.remove('open');
+    await renderLevels();
+  };
+  document.getElementById('deleteLevel').onclick = async ()=>{
+    if(!confirm('Удалить уровень?')) return;
+    await deleteDoc(doc(db,'levels',lv.id));
+    await recalcApprovedCompletions();
+    levelModal.classList.remove('open');
+    await renderLevels();
+  };
+  levelModal.classList.add('open');
+}
+
+async function loadSubmissions(){
+  const [levelSnap, completionSnap, appealSnap] = await Promise.all([
+    getDocs(collection(db,'level_submissions')),
+    getDocs(collection(db,'completion_submissions')),
+    getDocs(collection(db,'appeals'))
+  ]);
+
+  allSubmissions = [];
+  levelSnap.forEach(d=>allSubmissions.push({ id:d.id, type:'level', data:d.data() }));
+  completionSnap.forEach(d=>allSubmissions.push({ id:d.id, type:'completion', data:d.data() }));
+  appealSnap.forEach(d=>allSubmissions.push({ id:d.id, type:'appeal', data:d.data() }));
+  renderSubmissionsList();
+}
+
+function renderSubmissionsList(){
+  const q = document.getElementById('submissionSearch').value.trim().toLowerCase();
+  const type = document.getElementById('submissionTypeFilter').value;
+  const box = document.getElementById('submissionsList');
+  box.innerHTML = '';
+
+  const filtered = allSubmissions.filter(x=>{
+    if(type !== 'all' && x.type !== type) return false;
+    const hay = `${x.data.nick ?? ''} ${x.data.text ?? ''} ${x.data.status ?? ''}`.toLowerCase();
+    return !q || hay.includes(q);
+  });
+
+  if(!filtered.length){ box.innerHTML = '<p>Ничего не найдено.</p>'; return; }
+  filtered.forEach(item=>{
+    const row = document.createElement('div');
+    row.className='row';
+    row.style.cursor='pointer';
+    row.innerHTML = `<b>[${item.type}]</b> ${item.data.nick ?? 'Без ника'} · ${item.data.status ?? '—'}<br>${item.data.text ?? ''}`;
+    row.onclick = ()=>openSubmissionDetail(item);
+    box.appendChild(row);
+  });
+}
+
+function openSubmissionDetail(item){
+  const detail = document.getElementById('submissionDetail');
+  const d = item.data;
+  detail.innerHTML = `
+    <div class="card">
+      <h3 style="margin-top:0;">Заявка [${item.type}]</h3>
+      <p><b>Ник:</b> ${d.nick ?? '—'}</p>
+      <p><b>Статус:</b> ${d.status ?? '—'}</p>
+      <p>${d.text ?? ''}</p>
+      <p class="small">Ссылка: ${d.link ?? '—'} · Файл: ${d.fileUrl ?? '—'}</p>
+      <input id="detailNote" placeholder="Комментарий">
+      <div id="detailActions" class="top-actions"></div>
+    </div>
+  `;
+
+  const actions = document.getElementById('detailActions');
+  if(item.type==='level' && d.status==='pending'){
+    actions.innerHTML = `<input id="detailRank" type="number" min="1" placeholder="Место"><button id="approve">Одобрить</button><button id="reject" class="btn-danger">Отклонить</button>`;
+    document.getElementById('approve').onclick = async ()=>{
+      const rank = Number(document.getElementById('detailRank').value);
+      if(!rank){ alert('Укажи место'); return; }
+      const ref = await addDoc(collection(db,'levels'), { link:d.link, text:d.text ?? '', fileUrl:d.fileUrl ?? '', rank, addedBy:currentElder.uid, addedByNick:currentElder.nick ?? 'elder', createdAt:serverTimestamp(), sourceSubmissionId:item.id, status:'active' });
+      await placeLevelAtRank(ref.id, rank);
+      await updateDoc(doc(db,'level_submissions',item.id), { status:'approved', note:document.getElementById('detailNote').value.trim(), reviewedBy:currentElder.uid, reviewedAt:serverTimestamp(), finalRank:rank });
+      await loadSubmissions();
+      await renderLevels();
+      detail.innerHTML='';
+    };
+    document.getElementById('reject').onclick = async ()=>{
+      await updateDoc(doc(db,'level_submissions',item.id), { status:'rejected', note:document.getElementById('detailNote').value.trim() || 'Отклонено', reviewedBy:currentElder.uid, reviewedAt:serverTimestamp() });
+      await loadSubmissions(); detail.innerHTML='';
+    };
+  } else if(item.type==='completion' && d.status==='pending'){
+    const opts = levelsCache.map(l=>`<option value="${l.id}">#${l.rank} · ${String(l.text ?? '').slice(0,60)}</option>`).join('');
+    actions.innerHTML = `<select id="detailRank"><option value="">Выбери уровень</option>${opts}</select><button id="approve">Одобрить</button><button id="reject" class="btn-danger">Отклонить</button>`;
+    document.getElementById('approve').onclick = async ()=>{
+      const levelId = document.getElementById('detailRank').value;
+      if(!levelId){ alert('Выбери уровень'); return; }
+      const level = levelsCache.find(x=>x.id===levelId);
+      const rank = Number(level?.rank ?? 1);
+      const userRef = doc(db,'users',d.playerId);
+      const userSnap = await getDoc(userRef);
+      const userData = userSnap.exists() ? userSnap.data() : null;
+      if(!userData){ alert('Игрок не найден'); return; }
+      const comps = await getDocs(query(collection(db,'completion_submissions'), where('playerId','==',d.playerId)));
+      let approvedCount = 0; comps.forEach(x=>{ if(x.data().status==='approved') approvedCount++; });
+      const earned = calculateCompletionPoints(rank, Math.max(2, levelsCache.length), approvedCount + 1, scoringCfg);
+      await updateDoc(userRef, { points:Number(userData.points ?? 0) + earned });
+      await updateDoc(doc(db,'completion_submissions',item.id), { status:'approved', note:document.getElementById('detailNote').value.trim(), reviewedBy:currentElder.uid, reviewedAt:serverTimestamp(), awardedPoints:earned, listRank:rank, listQuantity:Math.max(2, levelsCache.length), scoreK:approvedCount+1, levelId });
+      await recalcApprovedCompletions();
+      await loadSubmissions(); detail.innerHTML='';
+    };
+    document.getElementById('reject').onclick = async ()=>{
+      await updateDoc(doc(db,'completion_submissions',item.id), { status:'rejected', note:document.getElementById('detailNote').value.trim() || 'Отклонено', reviewedBy:currentElder.uid, reviewedAt:serverTimestamp() });
+      await loadSubmissions(); detail.innerHTML='';
+    };
+  } else if(item.type==='appeal' && d.status==='pending'){
+    actions.innerHTML = `<button id="approve">Удовлетворить</button><button id="reject" class="btn-danger">Отклонить</button>`;
+    document.getElementById('approve').onclick = async ()=>{ await updateDoc(doc(db,'appeals',item.id), { status:'approved', note:document.getElementById('detailNote').value.trim() || 'Апелляция удовлетворена', reviewedBy:currentElder.uid, reviewedAt:serverTimestamp() }); await loadSubmissions(); detail.innerHTML=''; };
+    document.getElementById('reject').onclick = async ()=>{ await updateDoc(doc(db,'appeals',item.id), { status:'rejected', note:document.getElementById('detailNote').value.trim() || 'Апелляция отклонена', reviewedBy:currentElder.uid, reviewedAt:serverTimestamp() }); await loadSubmissions(); detail.innerHTML=''; };
+  } else {
+    actions.innerHTML = '<p class="small">Эта заявка уже обработана.</p>';
+  }
+}
+
+onAuthStateChanged(auth, async user=>{
+  if(!user) return location.href='index.html';
+  try {
+    const meSnap = await getDoc(doc(db,'users',user.uid));
+    const me = meSnap.exists() ? meSnap.data() : null;
+    if(!me || me.situation!=='verified') return location.href='nick.html';
+    if(me.role!=='elder') return location.href='main.html';
+    currentElder = { uid:user.uid, nick:me.nick ?? 'elder' };
+
+    await loadScoring();
+    await renderLevels();
+    await loadSubmissions();
+    statusEl.textContent = '';
+  } catch (e) {
+    console.error(e);
+    statusEl.textContent = 'Не удалось загрузить меню листа. Проверь rules/интернет.';
+  }
+});
+</script>
+</body>
+</html>
