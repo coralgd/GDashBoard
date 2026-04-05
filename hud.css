@@ -21,20 +21,21 @@ body > * {
 body::before {
   content: "";
   position: fixed;
-  inset: -86vh -70vw 4vh -70vw;
+  inset: -70vh -70vw -10vh -70vw;
   background:
     repeating-linear-gradient(to right, rgba(0,210,255,0.38) 0 2px, transparent 2px 64px),
     repeating-linear-gradient(to bottom, rgba(0,210,255,0.3) 0 2px, transparent 2px 44px);
+  background-position: 0 0, 0 0;
   transform-origin: center bottom;
-  transform: perspective(700px) rotateX(73deg) scale(1.75) translateY(1%);
-  animation: grid-forward 8.5s linear infinite;
+  transform: perspective(700px) rotateX(73deg) scale(1.72) translateY(14%);
+  animation: grid-horizontal-drift 42s linear infinite;
   z-index: 0;
   pointer-events: none;
 }
 
-@keyframes grid-forward {
-  from { transform: perspective(700px) rotateX(73deg) scale(1.58) translateY(7%); }
-  to { transform: perspective(700px) rotateX(73deg) scale(1.95) translateY(-1%); }
+@keyframes grid-horizontal-drift {
+  from { background-position: 0 0, 0 0; }
+  to { background-position: 0 0, 0 220px; }
 }
 
 body::after {
