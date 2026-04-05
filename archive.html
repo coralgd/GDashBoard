@@ -66,17 +66,18 @@ const TYPE_LABELS = {
   completion: 'заявки на прохождение',
   appeal: 'апелляции',
   comments: 'комментарии модера',
-  placement: 'заявки на постановку'
+  placement: 'заявки на постановку',
+  awards: 'начисления'
 };
 
 function ensurePair(levelName, playerName){
   if(!state.levels.has(levelName)) state.levels.set(levelName, new Map());
   const byPlayer = state.levels.get(levelName);
-  if(!byPlayer.has(playerName)) byPlayer.set(playerName, { completion:[], appeal:[], comments:[], placement:[] });
+  if(!byPlayer.has(playerName)) byPlayer.set(playerName, { completion:[], appeal:[], comments:[], placement:[], awards:[] });
 
   if(!state.players.has(playerName)) state.players.set(playerName, new Map());
   const byLevel = state.players.get(playerName);
-  if(!byLevel.has(levelName)) byLevel.set(levelName, { completion:[], appeal:[], comments:[], placement:[] });
+  if(!byLevel.has(levelName)) byLevel.set(levelName, { completion:[], appeal:[], comments:[], placement:[], awards:[] });
 
   return { byPlayer: byPlayer.get(playerName), byLevel: byLevel.get(levelName) };
 }
@@ -197,16 +198,21 @@ function render(){
   if(!items.length){ content.innerHTML='<p>Отправки не найдены.</p>'; return; }
   content.innerHTML = items.map((x,i)=>{
     const when = x.reviewedAt?.seconds ? new Date(x.reviewedAt.seconds*1000).toLocaleString('ru-RU') : '—';
+    if(state.itemType==='awards'){
+      const created = x.createdAt?.seconds ? new Date(x.createdAt.seconds*1000).toLocaleString('ru-RU') : '—';
+      return `<div class="card"><b>#${i+1} · ${Number(x.amount ?? 0)} очков</b><p>${x.reason ?? 'Без причины'}</p><p class="small">выдал: ${x.grantedByNick ?? '—'} · дата: ${created}</p></div>`;
+    }
     return `<div class="card"><b>#${i+1} · ${x.status ?? '—'}</b><p>${x.text ?? ''}</p><p class="small">link=${x.link ?? '—'} · file=${x.fileUrl ?? '—'} · ref=${x.referenceSubmissionId ?? '—'}</p><p class="small">note=${x.note ?? '—'} · reviewedBy=${x.reviewedBy ?? '—'} · reviewedAt=${when}</p></div>`;
   }).join('');
 }
 
 async function loadData(){
-  const [levelListSnap, ls, cs, ap] = await Promise.all([
+  const [levelListSnap, ls, cs, ap, awardsSnap] = await Promise.all([
     getDocs(collection(db,'levels')),
     getDocs(collection(db,'level_submissions')),
     getDocs(collection(db,'completion_submissions')),
-    getDocs(collection(db,'appeals'))
+    getDocs(collection(db,'appeals')),
+    getDocs(collection(db,'point_awards'))
   ]);
 
   const levelNameById = new Map();
@@ -249,6 +255,11 @@ async function loadData(){
     const player = normalizeName(x.nick, 'Без ника');
     addToPair(levelName, player, 'appeal', x);
     addCommentIfNeeded(levelName, player, x);
+  });
+  awardsSnap.forEach(d=>{
+    const x = d.data();
+    const player = normalizeName(x.playerNick, 'Без ника');
+    addToPair('Начисления', player, 'awards', x);
   });
 }
 
