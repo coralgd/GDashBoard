@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
@@ -21,7 +21,6 @@
   <p class="small">Здесь можно быстро корректировать очки обычных игроков (без ролей модерации).</p>
   <div id="players"></div>
 </div>
-
 <script type="module">
 import { auth, db, getNetworkErrorMessage } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
@@ -73,9 +72,9 @@ async function renderPlayers(){
     row.append(nick, email, input, save);
     playersEl.appendChild(row);
   });
-}
+  users.sort((a,b) => String(a.nick ?? '').localeCompare(String(b.nick ?? ''), 'ru'));
 
-onAuthStateChanged(auth, async user => {
+onAuthStateChanged(auth, async user=>{
   if(!user) return location.href='index.html';
   try {
     const meSnap = await getDoc(doc(db,'users',user.uid));

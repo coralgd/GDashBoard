@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
@@ -18,6 +18,14 @@
     <button id="backMain" class="btn-ghost">На главную</button>
   </div>
   <p id="status" style="color:#00ffff;">Загрузка...</p>
+  <div class="top-actions"><button id="goElderLevels" class="btn-hero">Меню листа</button></div>
+
+  <div class="top-actions">
+    <button id="goElderLevels" class="btn-hero">Меню листа</button>
+    <button id="tabUsers" class="btn-success">Игроки</button>
+    <button id="tabDeleting">Удаляемые</button>
+    <button id="clearMods" class="btn-danger">Очистить историю отправок у всех модеров</button>
+  </div>
 
   <div class="top-actions">
     <button id="goElderLevels" class="btn-hero">Меню листа</button>
@@ -58,8 +66,12 @@
       <button id="confirmDelete" class="btn-danger">Подтвердить удаление</button>
       <button id="cancelDelete" class="btn-ghost">Отмена</button>
     </div>
+    <div id="profile" class="section active"></div>
+    <div id="subs" class="section"></div>
   </div>
 </div>
+
+<div id="modal" class="dialog-backdrop"><div class="dialog"><div class="page-header"><h2 id="mTitle">Игрок</h2><button id="mClose" class="btn-ghost">Закрыть</button></div><div id="profile" class="section active"></div><div id="subs" class="section"></div></div></div>
 
 <script type="module">
 import { auth, db, getNetworkErrorMessage } from './firebase.js';
