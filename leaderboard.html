@@ -63,6 +63,15 @@ const modalBody = document.getElementById('modalBody');
 let allCompletions = [];
 let approvedCompletions = [];
 let levelsById = new Map();
+let scoring = { maximumPoints:100, rankDecayFactor:3, repeatPenaltyPower:0.5 };
+
+
+function calcPoints(rank, size, k=1){
+  const n = Math.max(2, Number(size || 2));
+  const r = Math.max(1, Math.min(Number(rank || 1), n));
+  const x = (r - 1) / (n - 1);
+  return Math.round((scoring.maximumPoints * Math.exp(-scoring.rankDecayFactor * x) / Math.pow(Math.max(1,k), scoring.repeatPenaltyPower))*100)/100;
+}
 
 function setView(name){
   const players = name === 'players';
@@ -180,7 +189,8 @@ function renderLevels(levels){
   levels.forEach(l => {
     const row = document.createElement('div');
     row.className = 'row list-item clickable';
-    row.innerHTML = `<div>${Number(l.rank ?? 0) || '—'}</div><div>${l.text ?? 'Без названия'}</div><div><a target="_blank" href="${l.link ?? '#'}">Открыть</a></div>`;
+    const basePoints = calcPoints(Number(l.rank ?? 1), levels.length, 1);
+    row.innerHTML = `<div>${Number(l.rank ?? 0) || '—'}</div><div>${l.text ?? 'Без названия'}</div><div>${basePoints} <span class="small">pts</span></div>`;
 
     row.onclick = (e)=>{
       if(e.target.tagName === 'A') return;
@@ -194,7 +204,8 @@ function renderLevels(levels){
         return;
       }
 
-      let html = '<table class="modal-table"><thead><tr><th>#</th><th>Игрок</th><th>Очки</th></tr></thead><tbody>';
+      let html = `<p><b>Базовые очки уровня:</b> ${calcPoints(Number(l.rank ?? 1), levels.length, 1)}</p>`;
+      html += '<table class="modal-table"><thead><tr><th>#</th><th>Игрок</th><th>Очки</th></tr></thead><tbody>';
       passed.forEach((c, idx)=>{
         html += `<tr><td>${idx+1}</td><td>${c.nick ?? 'Без ника'}</td><td>${Number(c.awardedPoints ?? 0)}</td></tr>`;
       });
@@ -214,12 +225,20 @@ onAuthStateChanged(auth, async user => {
     const me = meSnap.exists() ? meSnap.data() : null;
     if(!me || me.situation!=='verified') return location.href='nick.html';
 
-    const [usersSnap, levelsSnap, allCompSnap, approvedSnap] = await Promise.all([
+    const [usersSnap, levelsSnap, allCompSnap, approvedSnap, scoreSnap] = await Promise.all([
       getDocs(query(collection(db,'users'), orderBy('points','desc'))),
       getDocs(query(collection(db,'levels'), orderBy('rank','asc'))),
       getDocs(collection(db,'completion_submissions')),
-      getDocs(query(collection(db,'completion_submissions'), where('status','==','approved')))
+      getDocs(query(collection(db,'completion_submissions'), where('status','==','approved'))),
+      getDoc(doc(db,'settings','scoring'))
     ]);
+
+    const sv = scoreSnap.exists() ? scoreSnap.data() : {};
+    scoring = {
+      maximumPoints: Number(sv.maximumPoints ?? sv.maxPoints ?? 100),
+      rankDecayFactor: Number(sv.rankDecayFactor ?? sv.decayA ?? 3),
+      repeatPenaltyPower: Number(sv.repeatPenaltyPower ?? sv.grindPower ?? 0.5)
+    };
 
     const users = [];
     let seen = 0;
