@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Архив</title>
+<link rel="stylesheet" href="hud.css">
+<style>
+  .folder{cursor:pointer}
+  .path{margin:8px 0}
+</style>
+</head>
+<body>
+<div class="hud" style="max-width:1200px;margin:40px auto;">
+  <div class="page-header"><h1>Архив обработанных</h1><button id="back" class="btn-ghost">На главную</button></div>
+  <p id="status" style="color:#00ffff;">Загрузка...</p>
+  <div id="archive"></div>
+</div>
+
+<script type="module">
+import { auth, db, getNetworkErrorMessage } from './firebase.js';
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
+import { collection, getDocs, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+
+const statusEl = document.getElementById('status');
+document.getElementById('back').onclick = ()=> location.href='main.html';
+
+const archiveState = { levels:new Map(), current:{levelKey:'',playerKey:'',typeKey:''}, search:'' };
+
+function getTypeLabel(typeKey){
+  if(typeKey==='completion') return 'Прохождения';
+  if(typeKey==='level') return 'Уровни';
+  return 'Апелляции';
+}
+
+function putArchiveItem(levelName, playerName, typeKey, item){
+  const levelKey = levelName || 'Без уровня';
+  if(!archiveState.levels.has(levelKey)) archiveState.levels.set(levelKey,{key:levelKey,name:levelKey,players:new Map()});
+  const levelNode = archiveState.levels.get(levelKey);
+  const playerKey = playerName || 'Без ника';
+  if(!levelNode.players.has(playerKey)) levelNode.players.set(playerKey,{key:playerKey,name:playerKey,types:new Map()});
+  const playerNode = levelNode.players.get(playerKey);
+  if(!playerNode.types.has(typeKey)) playerNode.types.set(typeKey,[]);
+  playerNode.types.get(typeKey).push(item);
+}
+
+function renderArchive(){
+  const box = document.getElementById('archive');
+  const c = archiveState.current;
+  const q = archiveState.search.trim().toLowerCase();
+  box.innerHTML = `
+    <div class="path top-actions">
+      <button id="aRoot" class="btn-ghost">Корень архива</button>
+      ${c.levelKey ? `<button id="aLevel" class="btn-ghost">${c.levelKey}</button>` : ''}
+      ${c.playerKey ? `<button id="aPlayer" class="btn-ghost">${c.playerKey}</button>` : ''}
+      ${c.typeKey ? `<button id="aType" class="btn-ghost">${getTypeLabel(c.typeKey)}</button>` : ''}
+    </div>
+    <input id="aSearch" placeholder="Поиск: уровень / игрок / текст / статус" value="${archiveState.search.replace(/"/g,'&quot;')}">
+    <div id="aList"></div>
+  `;
+
+  document.getElementById('aSearch').oninput = (e)=>{ archiveState.search = e.target.value; renderArchive(); };
+  document.getElementById('aRoot').onclick = ()=>{ archiveState.current={levelKey:'',playerKey:'',typeKey:''}; renderArchive(); };
+  if(c.levelKey) document.getElementById('aLevel').onclick = ()=>{ archiveState.current={levelKey:c.levelKey,playerKey:'',typeKey:''}; renderArchive(); };
+  if(c.playerKey) document.getElementById('aPlayer').onclick = ()=>{ archiveState.current={levelKey:c.levelKey,playerKey:c.playerKey,typeKey:''}; renderArchive(); };
+
+  const list = document.getElementById('aList');
+  if(!c.levelKey){
+    if(q){
+      const byPlayer = new Map();
+      archiveState.levels.forEach(level=>{
+        level.players.forEach((player, pKey)=>{
+          if(!pKey.toLowerCase().includes(q)) return;
+          if(!byPlayer.has(pKey)) byPlayer.set(pKey, []);
+          byPlayer.get(pKey).push(level.name);
+        });
+      });
+      if(byPlayer.size){
+        let out = '<h3>Игроки по поиску</h3>';
+        byPlayer.forEach((levels, player)=>{
+          out += `<div class="row"><b>${player}</b><p class="small">Уровни: ${levels.join(', ')}</p><div class="top-actions">`;
+          levels.forEach(l=>{ out += `<button class="openLevelForPlayer" data-level="${l}" data-player="${player}">${l}</button>`; });
+          out += '</div></div>';
+        });
+        list.innerHTML = out;
+        list.querySelectorAll('.openLevelForPlayer').forEach(btn=>btn.onclick=()=>{ archiveState.current={levelKey:btn.dataset.level,playerKey:btn.dataset.player,typeKey:''}; renderArchive(); });
+        return;
+      }
+    }
+
+    const levels = Array.from(archiveState.levels.values()).filter(x=>!q || x.name.toLowerCase().includes(q)).sort((a,b)=>a.name.localeCompare(b.name,'ru'));
+    if(!levels.length){ list.innerHTML='<p>В архиве ничего не найдено.</p>'; return; }
+    list.innerHTML = levels.map(l=>`<div class="row folder" data-level="${l.key}">📁 <b>${l.name}</b> <span class="small">(${l.players.size} игроков)</span></div>`).join('');
+    list.querySelectorAll('[data-level]').forEach(el=>el.onclick=()=>{ archiveState.current={levelKey:el.dataset.level,playerKey:'',typeKey:''}; renderArchive(); });
+    return;
+  }
+
+  const level = archiveState.levels.get(c.levelKey);
+  if(!level){ list.innerHTML='<p>Уровень не найден.</p>'; return; }
+
+  if(!c.playerKey){
+    const players = Array.from(level.players.values()).filter(x=>!q || x.name.toLowerCase().includes(q)).sort((a,b)=>a.name.localeCompare(b.name,'ru'));
+    if(!players.length){ list.innerHTML='<p>Игроков не найдено.</p>'; return; }
+    list.innerHTML = players.map(p=>`<div class="row folder" data-player="${p.key}">📁 <b>${p.name}</b> <span class="small">(${p.types.size} типов)</span></div>`).join('');
+    list.querySelectorAll('[data-player]').forEach(el=>el.onclick=()=>{ archiveState.current={levelKey:c.levelKey,playerKey:el.dataset.player,typeKey:''}; renderArchive(); });
+    return;
+  }
+
+  const player = level.players.get(c.playerKey);
+  if(!player){ list.innerHTML='<p>Игрок не найден.</p>'; return; }
+
+  if(!c.typeKey){
+    const types = Array.from(player.types.keys()).filter(t=>!q || getTypeLabel(t).toLowerCase().includes(q));
+    if(!types.length){ list.innerHTML='<p>Типы отправок не найдены.</p>'; return; }
+    list.innerHTML = types.map(t=>`<div class="row folder" data-type="${t}">📁 <b>${getTypeLabel(t)}</b> <span class="small">(${player.types.get(t).length})</span></div>`).join('');
+    list.querySelectorAll('[data-type]').forEach(el=>el.onclick=()=>{ archiveState.current={levelKey:c.levelKey,playerKey:c.playerKey,typeKey:el.dataset.type}; renderArchive(); });
+    return;
+  }
+
+  const items = (player.types.get(c.typeKey) || []).filter(x=>!q || `${x.text ?? ''} ${x.link ?? ''} ${x.note ?? ''} ${x.status ?? ''} ${x.referenceSubmissionId ?? ''}`.toLowerCase().includes(q)).sort((a,b)=>(b.reviewedAt?.seconds ?? 0)-(a.reviewedAt?.seconds ?? 0));
+  if(!items.length){ list.innerHTML='<p>Отправки не найдены.</p>'; return; }
+  list.innerHTML = items.map((x,i)=>{const when=x.reviewedAt?.seconds?new Date(x.reviewedAt.seconds*1000).toLocaleString('ru-RU'):'—'; return `<div class="row"><b>#${i+1} · ${x.status ?? '—'}</b><p>${x.text ?? ''}</p><p class="small">link=${x.link ?? '—'} · file=${x.fileUrl ?? '—'} · ref=${x.referenceSubmissionId ?? '—'}</p><p class="small">note=${x.note ?? '—'} · reviewedBy=${x.reviewedBy ?? '—'} · reviewedAt=${when}</p></div>`;}).join('');
+}
+
+async function loadArchive(){
+  const [levelListSnap, ls, cs, ap] = await Promise.all([
+    getDocs(collection(db,'levels')),
+    getDocs(collection(db,'level_submissions')),
+    getDocs(collection(db,'completion_submissions')),
+    getDocs(collection(db,'appeals'))
+  ]);
+
+  const levelNameById = new Map();
+  const levelNameByRank = new Map();
+  levelListSnap.forEach(d=>{const l=d.data();levelNameById.set(d.id,l.text ?? `Уровень ${d.id}`);if(l.rank!=null) levelNameByRank.set(Number(l.rank), l.text ?? `Уровень #${l.rank}`);});
+
+  archiveState.levels = new Map();
+  ls.forEach(d=>{const x=d.data(); if(!x.status || x.status==='pending') return; const levelName=x.finalRank!=null?(levelNameByRank.get(Number(x.finalRank)) ?? `Уровень #${x.finalRank}`):'Без уровня'; putArchiveItem(levelName,x.nick ?? 'Без ника','level',x);});
+  cs.forEach(d=>{const x=d.data(); if(!x.status || x.status==='pending') return; let levelName='Без уровня'; if(x.levelId) levelName=levelNameById.get(x.levelId) ?? `Уровень ${x.levelId}`; else if(x.listRank!=null) levelName=levelNameByRank.get(Number(x.listRank)) ?? `Уровень #${x.listRank}`; putArchiveItem(levelName,x.nick ?? 'Без ника','completion',x);});
+  ap.forEach(d=>{const x=d.data(); if(!x.status || x.status==='pending') return; const levelName=x.levelId?(levelNameById.get(x.levelId) ?? `Уровень ${x.levelId}`):'Без уровня'; putArchiveItem(levelName,x.nick ?? 'Без ника','appeal',x);});
+
+  renderArchive();
+}
+
+onAuthStateChanged(auth, async user=>{
+  if(!user) return location.href='index.html';
+  try {
+    const meSnap = await getDoc(doc(db,'users',user.uid));
+    const me = meSnap.exists()?meSnap.data():null;
+    if(!me || me.situation!=='verified') return location.href='nick.html';
+    await loadArchive();
+    statusEl.textContent='';
+  } catch(e){
+    statusEl.textContent = getNetworkErrorMessage(e);
+  }
+});
+</script>
+</body>
+</html>

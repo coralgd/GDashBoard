@@ -12,6 +12,10 @@
     <input id="link" placeholder="Ссылка (опционально)" style="width:100%"><br><br>
     <textarea id="text" placeholder="Текст апелляции" style="width:100%;min-height:120px"></textarea><br><br>
     <input id="fileUrl" placeholder="Ссылка на файл (опционально)" style="width:100%"><br><br>
+
+    <label class="small">Сослаться на прошлую отправку (опц.)</label>
+    <select id="ref" style="width:100%"><option value="">Без ссылки</option></select><br><br>
+
     <div class="top-actions">
       <button id="send">Отправить</button>
       <button id="back">Назад</button>
@@ -21,33 +25,64 @@
 </div>
 
 <script type="module">
-import { auth, db } from './firebase.js';
+import { auth, db, getNetworkErrorMessage } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import { doc, getDoc, addDoc, collection, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+import { doc, getDoc, addDoc, collection, serverTimestamp, getDocs, query, where } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
 let user = null;
 let profile = null;
 
+async function loadRefs(uid){
+  const sel = document.getElementById('ref');
+  const [a,b,c] = await Promise.all([
+    getDocs(query(collection(db,'level_submissions'), where('authorId','==',uid))),
+    getDocs(query(collection(db,'completion_submissions'), where('playerId','==',uid))),
+    getDocs(query(collection(db,'appeals'), where('playerId','==',uid)))
+  ]);
+  const items=[];
+  a.forEach(d=>items.push({id:d.id,type:'level',...d.data()}));
+  b.forEach(d=>items.push({id:d.id,type:'completion',...d.data()}));
+  c.forEach(d=>items.push({id:d.id,type:'appeal',...d.data()}));
+  items.sort((x,y)=>(y.createdAt?.seconds||0)-(x.createdAt?.seconds||0));
+  items.slice(0,50).forEach(x=>{
+    const o=document.createElement('option');
+    o.value = `${x.type}:${x.id}`;
+    o.textContent = `[${x.type}/${x.status ?? 'pending'}] ${String(x.text ?? '').slice(0,70) || 'Без текста'}`;
+    sel.appendChild(o);
+  });
+}
+
 onAuthStateChanged(auth, async u=>{
   if(!u) return location.href='index.html';
-  user = u;
-  const snap = await getDoc(doc(db,'users',u.uid));
-  profile = snap.exists() ? snap.data() : null;
-  if(!profile || profile.situation!=='verified') return location.href='nick.html';
+  try {
+    user = u;
+    const snap = await getDoc(doc(db,'users',u.uid));
+    profile = snap.exists() ? snap.data() : null;
+    if(!profile || profile.situation!=='verified') return location.href='nick.html';
+    await loadRefs(u.uid);
+  } catch (e) {
+    document.getElementById('msg').textContent = getNetworkErrorMessage(e);
+  }
 });
 
 send.onclick = async ()=>{
   const link = document.getElementById('link').value.trim();
   const text = document.getElementById('text').value.trim();
   const fileUrl = document.getElementById('fileUrl').value.trim();
+  const referenceSubmissionId = document.getElementById('ref').value || '';
   const msg = document.getElementById('msg');
   if(!text){ msg.textContent='Нужен текст апелляции'; return; }
 
-  await addDoc(collection(db,'appeals'), {
-    playerId:user.uid, nick:profile.nick ?? 'Без ника', link, text, fileUrl,
-    status:'pending', note:'', createdAt:serverTimestamp()
-  });
-  msg.textContent='Апелляция отправлена.';
+  try {
+    await addDoc(collection(db,'appeals'), {
+      playerId:user.uid, nick:profile.nick ?? 'Без ника', link, text, fileUrl,
+      referenceSubmissionId,
+      status:'pending', note:'', createdAt:serverTimestamp()
+    });
+    msg.textContent='Апелляция отправлена.';
+  } catch (e) {
+    msg.textContent = getNetworkErrorMessage(e);
+  }
 };
 
 back.onclick = ()=> location.href='main.html';
