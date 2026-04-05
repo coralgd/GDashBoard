@@ -7,46 +7,52 @@
 <style>
   .panel{display:none}
   .panel.active{display:block}
-  .item{border:1px solid #2d8cff55;background:rgba(0,20,50,.35);padding:10px;border-radius:10px;margin-bottom:10px}
+  .row-head{display:grid;grid-template-columns:70px 1fr 140px;padding:10px 12px;border-bottom:1px solid rgba(0,160,255,0.35);font-weight:700;opacity:.9}
+  .level-card{border:1px solid #2d8cff55;background:rgba(0,20,50,.35);padding:10px;border-radius:10px;margin-bottom:10px}
 </style>
 </head>
 <body>
-<div class="hud" style="max-width:1080px;margin:30px auto;">
+<div class="hud" style="max-width:1100px;margin:30px auto;">
   <div class="page-header">
-    <h1 style="margin:0;">Лидерборд и лист</h1>
+    <h1 style="margin:0;">Лидерборд</h1>
     <button id="backMain" class="btn-ghost">На главную</button>
   </div>
+  <p id="status" style="color:#00ffff;margin:8px 0 12px;">Загрузка...</p>
 
-  <p id="status" style="color:#00ffff;margin:8px 0 10px;">Загрузка...</p>
-
-  <div class="tabs" style="grid-template-columns:repeat(2,minmax(0,1fr));">
-    <button id="tabPlayers">Игроки</button>
-    <button id="tabLevels">Лист уровней</button>
+  <div class="stats-grid">
+    <div class="stat"><div class="small">Верифицированных</div><b id="statUsers">—</b></div>
+    <div class="stat"><div class="small">Уровней в листе</div><b id="statLevels">—</b></div>
   </div>
 
-  <div id="playersPanel" class="panel active">
+  <div class="tabs" style="grid-template-columns:repeat(2,minmax(0,1fr));margin-top:10px;">
+    <button id="openPlayers">Игроки</button>
+    <button id="openLevels">Лист уровней</button>
+  </div>
+
+  <section id="playersPanel" class="panel active">
     <div class="toolbar">
-      <input id="playerSearch" placeholder="Поиск игрока по нику">
+      <input id="playerSearch" placeholder="Поиск по нику">
       <select id="roleFilter">
         <option value="all">Все роли</option>
         <option value="player">Игроки</option>
         <option value="moderator">Модераторы</option>
-        <option value="elder">Старшие модеры</option>
+        <option value="elder">Старшие модераторы</option>
       </select>
     </div>
+    <div class="row-head"><div>#</div><div>Игрок</div><div>Очки</div></div>
     <div id="playersList"></div>
-  </div>
+  </section>
 
-  <div id="levelsPanel" class="panel">
+  <section id="levelsPanel" class="panel">
     <div class="toolbar">
-      <input id="levelSearch" placeholder="Поиск уровня по описанию или ссылке">
+      <input id="levelSearch" placeholder="Поиск по уровню/ссылке">
       <select id="levelSort">
         <option value="rankAsc">Сначала топ</option>
         <option value="rankDesc">Сначала низ</option>
       </select>
     </div>
     <div id="levelsList"></div>
-  </div>
+  </section>
 </div>
 
 <script type="module">
@@ -56,66 +62,61 @@ import { collection, query, orderBy, getDocs, doc, getDoc } from "https://www.gs
 
 const playersList = document.getElementById('playersList');
 const levelsList = document.getElementById('levelsList');
+const statUsers = document.getElementById('statUsers');
+const statLevels = document.getElementById('statLevels');
+
 const playerSearch = document.getElementById('playerSearch');
 const roleFilter = document.getElementById('roleFilter');
 const levelSearch = document.getElementById('levelSearch');
 const levelSort = document.getElementById('levelSort');
 
 let currentUid = null;
-let usersCache = [];
-let levelsCache = [];
-let scoringCfg = { maximumPoints:100, rankDecayFactor:3, repeatPenaltyPower:0.5 };
+let users = [];
+let levels = [];
+let scoring = { maximumPoints:100, rankDecayFactor:3, repeatPenaltyPower:0.5 };
 
-function escapeHtml(v){ return String(v ?? '').replace(/[&<>'"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;' }[c])); }
-function normalizeUrl(value){
-  try {
-    const u = new URL((value ?? '').trim());
-    if(u.protocol !== 'http:' && u.protocol !== 'https:') return '';
-    return u.toString();
-  } catch { return ''; }
-}
-function calculateCompletionPoints(rank, size, k, s){
-  const normalizedListSize = Math.max(2, Number(size || 2));
-  const normalizedRank = Math.max(1, Math.min(Number(rank || 1), normalizedListSize));
-  const x = (normalizedRank - 1) / (normalizedListSize - 1);
-  const base = s.maximumPoints * Math.exp(-s.rankDecayFactor * x);
-  const anti = 1 / Math.pow(Math.max(1, k), s.repeatPenaltyPower);
-  return Math.round(base * anti * 100) / 100;
+function esc(v){ return String(v ?? '').replace(/[&<>'"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;' }[c])); }
+function safeUrl(v){ try{ const u = new URL((v ?? '').trim()); return (u.protocol==='http:' || u.protocol==='https:') ? u.toString() : ''; }catch{return '';} }
+function pointsForRank(rank,size,k=1){
+  const n = Math.max(2, Number(size || 2));
+  const r = Math.max(1, Math.min(Number(rank || 1), n));
+  const x = (r - 1)/(n - 1);
+  return Math.round((scoring.maximumPoints * Math.exp(-scoring.rankDecayFactor*x) / Math.pow(Math.max(1,k), scoring.repeatPenaltyPower))*100)/100;
 }
 
-function setTab(panel){
-  document.getElementById('playersPanel').classList.toggle('active', panel==='players');
-  document.getElementById('levelsPanel').classList.toggle('active', panel==='levels');
-  document.getElementById('tabPlayers').classList.toggle('active', panel==='players');
-  document.getElementById('tabLevels').classList.toggle('active', panel==='levels');
+function setPanel(name){
+  document.getElementById('playersPanel').classList.toggle('active', name==='players');
+  document.getElementById('levelsPanel').classList.toggle('active', name==='levels');
+  document.getElementById('openPlayers').classList.toggle('active', name==='players');
+  document.getElementById('openLevels').classList.toggle('active', name==='levels');
 }
 
-document.getElementById('tabPlayers').onclick = ()=>setTab('players');
-document.getElementById('tabLevels').onclick = ()=>setTab('levels');
+document.getElementById('openPlayers').onclick = ()=>setPanel('players');
+document.getElementById('openLevels').onclick = ()=>setPanel('levels');
 document.getElementById('backMain').onclick = ()=> location.href='main.html';
 
 function renderPlayers(){
+  playersList.innerHTML = '';
   const q = playerSearch.value.trim().toLowerCase();
   const role = roleFilter.value;
-  playersList.innerHTML = '';
 
-  const filtered = usersCache.filter(u=>{
-    const normalizedRole = (u.role==='moderator' || u.role==='elder') ? u.role : 'player';
-    if(role !== 'all' && role !== normalizedRole) return false;
+  const filtered = users.filter(u=>{
+    const r = (u.role==='moderator' || u.role==='elder') ? u.role : 'player';
+    if(role !== 'all' && role !== r) return false;
     if(q && !String(u.nick ?? '').toLowerCase().includes(q)) return false;
     return true;
   });
 
-  let pos = 0, rank = 0, lastPoints = null;
+  let place = 0, idx = 0, last = null;
   filtered.forEach(u=>{
-    pos++;
-    if(u.points !== lastPoints){ rank = pos; lastPoints = u.points; }
+    idx++;
+    if(u.points !== last){ place = idx; last = u.points; }
     const row = document.createElement('div');
-    row.className='row';
+    row.className = 'row';
     if(u.id===currentUid) row.classList.add('me');
     if(u.role==='moderator') row.classList.add('moderator');
     if(u.role==='elder') row.classList.add('elder');
-    row.innerHTML = `<div>${rank}</div><div>${escapeHtml(u.nick ?? 'Без ника')}</div><div>${Number(u.points ?? 0)}</div>`;
+    row.innerHTML = `<div>${place}</div><div>${esc(u.nick ?? 'Без ника')}</div><div>${Number(u.points ?? 0)}</div>`;
     playersList.appendChild(row);
   });
   statPlayers.textContent = String(usersCache.length);
@@ -151,6 +152,34 @@ function renderLevels(){
     levelsList.appendChild(item);
   });
 
+  if(!playersList.childElementCount) playersList.innerHTML = '<p>Игроки не найдены.</p>';
+}
+
+function renderLevels(){
+  levelsList.innerHTML = '';
+  const q = levelSearch.value.trim().toLowerCase();
+  const sort = levelSort.value;
+
+  const visible = levels
+    .filter(l=>l.status!=='archived')
+    .filter(l=>`${l.text ?? ''} ${l.link ?? ''}`.toLowerCase().includes(q))
+    .sort((a,b)=> sort==='rankDesc' ? Number(b.rank ?? 999999)-Number(a.rank ?? 999999) : Number(a.rank ?? 999999)-Number(b.rank ?? 999999));
+
+  const size = Math.max(2, visible.length);
+  visible.forEach(l=>{
+    const link = safeUrl(l.link);
+    const file = safeUrl(l.fileUrl);
+    const card = document.createElement('div');
+    card.className='level-card';
+    card.innerHTML = `
+      <b>#${Number(l.rank ?? 0) || '—'}</b> · ${link ? `<a href="${link}" target="_blank" rel="noopener noreferrer">Открыть уровень</a>` : '<span class="small">Некорректная ссылка</span>'}
+      <br>${esc(l.text ?? '')}
+      <br><span class="small">Файл: ${file ? `<a href="${file}" target="_blank" rel="noopener noreferrer">ссылка</a>` : '—'}</span>
+      <br><span class="small">Очки за прохождение: ${pointsForRank(Number(l.rank ?? 1), size, 1)}</span>
+    `;
+    levelsList.appendChild(card);
+  });
+
   if(!levelsList.childElementCount) levelsList.innerHTML = '<p>Уровни не найдены.</p>';
 }
 
@@ -159,29 +188,27 @@ roleFilter.onchange = renderPlayers;
 levelSearch.oninput = renderLevels;
 levelSort.onchange = renderLevels;
 
-async function loadData(){
-  const [usersSnap, levelsSnap, scoringSnap] = await Promise.all([
+async function loadAll(){
+  const [userSnap, levelSnap, scoringSnap] = await Promise.all([
     getDocs(query(collection(db,'users'), orderBy('points','desc'))),
     getDocs(query(collection(db,'levels'), orderBy('rank','asc'))),
     getDoc(doc(db,'settings','scoring'))
   ]);
 
   const s = scoringSnap.exists() ? scoringSnap.data() : {};
-  scoringCfg = {
+  scoring = {
     maximumPoints: Number(s.maximumPoints ?? s.maxPoints ?? 100),
     rankDecayFactor: Number(s.rankDecayFactor ?? s.decayA ?? 3),
     repeatPenaltyPower: Number(s.repeatPenaltyPower ?? s.grindPower ?? 0.5)
   };
 
-  usersCache = [];
-  usersSnap.forEach(d=>{
-    const u = d.data();
-    if(u.situation!=='verified') return;
-    usersCache.push({ id:d.id, ...u });
-  });
+  users = [];
+  userSnap.forEach(d=>{ const u=d.data(); if(u.situation==='verified') users.push({id:d.id, ...u}); });
+  levels = [];
+  levelSnap.forEach(d=>levels.push({id:d.id, ...d.data()}));
 
-  levelsCache = [];
-  levelsSnap.forEach(d=>levelsCache.push({ id:d.id, ...d.data() }));
+  statUsers.textContent = String(users.length);
+  statLevels.textContent = String(levels.filter(x=>x.status!=='archived').length);
 
   renderPlayers();
   renderLevels();
@@ -189,17 +216,17 @@ async function loadData(){
 
 onAuthStateChanged(auth, async user=>{
   if(!user) return location.href='index.html';
-  try {
+  try{
     const meSnap = await getDoc(doc(db,'users',user.uid));
     const me = meSnap.exists() ? meSnap.data() : null;
     if(!me || me.situation!=='verified') return location.href='nick.html';
 
     currentUid = user.uid;
-    await loadData();
+    await loadAll();
     statusEl.textContent = '';
-  } catch (e) {
+  } catch (e){
     console.error(e);
-    statusEl.textContent = 'Не удалось загрузить лидерборд. Проверь правила Firestore/интернет.';
+    statusEl.textContent = 'Лидерборд не загрузился. Проверь интернет/правила Firestore.';
   }
 });
 </script>
