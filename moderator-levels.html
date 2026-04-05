@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ru">
+<head><meta charset="UTF-8"><title>Меню уровней модератора</title><link rel="stylesheet" href="hud.css"><style>.panel{display:none}.panel.active{display:block}</style></head>
+<body>
+<div class="hud">
+  <div class="page-header"><h1>Меню уровней модератора</h1><button id="back" class="btn-ghost">Назад</button></div>
+  <p id="status" style="color:#00e5ff">Загрузка...</p>
+  <div class="tabs"><button data-tab="levels" class="active">Заявки уровней</button><button data-tab="comps">Заявки прохождений</button></div>
+  <div id="levels" class="panel active"></div>
+  <div id="comps" class="panel"></div>
+</div>
+<div id="modal" class="dialog-backdrop"><div class="dialog"><div class="page-header"><h2 id="mTitle">Заявка</h2><button id="mClose" class="btn-ghost">Закрыть</button></div><div id="mBody"></div></div></div>
+<script type="module">
+import { auth, db, getNetworkErrorMessage } from './firebase.js';
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
+import { addDoc, collection, doc, getDoc, getDocs, query, serverTimestamp, updateDoc, where } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+
+const statusEl=document.getElementById('status');
+let meRef=null;
+let levels=[];
+let scoring={maximumPoints:100,rankDecayFactor:3,repeatPenaltyPower:.5};
+
+document.getElementById('back').onclick=()=>location.href='moderator.html';
+document.getElementById('mClose').onclick=()=>document.getElementById('modal').classList.remove('open');
+document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-tab]').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.getElementById('levels').classList.toggle('active',b.dataset.tab==='levels');document.getElementById('comps').classList.toggle('active',b.dataset.tab==='comps');});
+
+function calc(rank,size,k){const n=Math.max(2,Number(size||2));const r=Math.max(1,Math.min(Number(rank||1),n));const x=(r-1)/(n-1);return Math.round((scoring.maximumPoints*Math.exp(-scoring.rankDecayFactor*x)/Math.pow(Math.max(1,k),scoring.repeatPenaltyPower))*100)/100;}
+
+async function loadLevels(){const snap=await getDocs(collection(db,'levels'));levels=[];snap.forEach(d=>{const l=d.data();if(l.status!=='archived')levels.push({id:d.id,...l});});levels.sort((a,b)=>Number(a.rank??999)-Number(b.rank??999));}
+async function loadScoring(){const s=await getDoc(doc(db,'settings','scoring'));const v=s.exists()?s.data():{};scoring={maximumPoints:Number(v.maximumPoints??v.maxPoints??100),rankDecayFactor:Number(v.rankDecayFactor??v.decayA??3),repeatPenaltyPower:Number(v.repeatPenaltyPower??v.grindPower??.5)};}
+
+function openModal(title,html){document.getElementById('mTitle').textContent=title;document.getElementById('mBody').innerHTML=html;document.getElementById('modal').classList.add('open');}
+
+async function renderLevelSubs(){
+  const box=document.getElementById('levels'); box.innerHTML='Загрузка...';
+  const snap=await getDocs(query(collection(db,'level_submissions'),where('status','==','pending')));
+  if(snap.empty){box.innerHTML='<p>Нет заявок.</p>';return;}
+  box.innerHTML='';
+  snap.forEach(d=>{
+    const s=d.data(); const card=document.createElement('div'); card.className='list-item clickable';
+    card.innerHTML=`<b>${s.nick??'Без ника'}</b><p class='small'>${s.text??'Без текста'}</p>`;
+    card.onclick=()=>{
+      openModal(`Заявка уровня: ${s.nick??'Без ника'}`,`<p>${s.text??''}</p><p>Ссылка: ${s.link?`<a href='${s.link}' target='_blank'>Открыть</a>`:'—'}</p><input id='note' placeholder='Комментарий'><input id='rank' type='number' min='1' placeholder='Место'><div class='top-actions'><button id='ok'>Одобрить</button><button id='no' class='btn-danger'>Отклонить</button></div>`);
+      document.getElementById('ok').onclick=async()=>{const rank=Number(document.getElementById('rank').value);if(!rank) return alert('Укажи место');await addDoc(collection(db,'levels'),{link:s.link??'',text:s.text??'',fileUrl:s.fileUrl??'',rank,status:'active',addedBy:meRef.uid,addedByNick:meRef.nick,createdAt:serverTimestamp(),sourceSubmissionId:d.id});await updateDoc(doc(db,'level_submissions',d.id),{status:'approved',note:document.getElementById('note').value.trim(),reviewedBy:meRef.uid,reviewedAt:serverTimestamp(),finalRank:rank});document.getElementById('modal').classList.remove('open');await loadLevels();await renderLevelSubs();};
+      document.getElementById('no').onclick=async()=>{await updateDoc(doc(db,'level_submissions',d.id),{status:'rejected',note:document.getElementById('note').value.trim()||'Отклонено модератором',reviewedBy:meRef.uid,reviewedAt:serverTimestamp()});document.getElementById('modal').classList.remove('open');await renderLevelSubs();};
+    };
+    box.appendChild(card);
+  });
+}
+
+async function renderCompSubs(){
+  const box=document.getElementById('comps'); box.innerHTML='Загрузка...';
+  const snap=await getDocs(query(collection(db,'completion_submissions'),where('status','==','pending')));
+  if(snap.empty){box.innerHTML='<p>Нет заявок.</p>';return;}
+  box.innerHTML=''; const size=Math.max(2,levels.length);
+  snap.forEach(d=>{
+    const s=d.data(); const card=document.createElement('div'); card.className='list-item clickable';
+    card.innerHTML=`<b>${s.nick??'Без ника'}</b><p class='small'>${s.text??'Без текста'}</p>`;
+    card.onclick=()=>{
+      const options=levels.map(l=>`<option value='${l.id}'>#${l.rank} · ${String(l.text??'').slice(0,70)}</option>`).join('');
+      openModal(`Заявка прохождения: ${s.nick??'Без ника'}`,`<p>${s.text??''}</p><select id='lvl'><option value=''>Выбери уровень</option>${options}</select><p id='prev' class='small'>Очки: —</p><input id='note' placeholder='Комментарий'><div class='top-actions'><button id='ok'>Подтвердить</button><button id='no' class='btn-danger'>Отклонить</button></div>`);
+      document.getElementById('lvl').onchange=async()=>{const l=levels.find(x=>x.id===document.getElementById('lvl').value);if(!l){document.getElementById('prev').textContent='Очки: —';return;}const comps=await getDocs(query(collection(db,'completion_submissions'),where('playerId','==',s.playerId)));let c=0;comps.forEach(x=>{if(x.data().status==='approved')c++;});document.getElementById('prev').textContent=`Очки: ${calc(l.rank,size,c+1)}`;};
+      document.getElementById('ok').onclick=async()=>{const l=levels.find(x=>x.id===document.getElementById('lvl').value);if(!l) return alert('Выбери уровень');const userRef=doc(db,'users',s.playerId);const us=await getDoc(userRef);const u=us.exists()?us.data():null;if(!u)return alert('Игрок не найден');const comps=await getDocs(query(collection(db,'completion_submissions'),where('playerId','==',s.playerId)));let c=0;comps.forEach(x=>{if(x.data().status==='approved')c++;});const k=c+1;const earned=calc(l.rank,size,k);await updateDoc(userRef,{points:Number(u.points??0)+earned});await updateDoc(doc(db,'completion_submissions',d.id),{status:'approved',note:document.getElementById('note').value.trim(),reviewedBy:meRef.uid,reviewedAt:serverTimestamp(),awardedPoints:earned,listRank:Number(l.rank??1),listQuantity:size,scoreK:k,levelId:l.id});document.getElementById('modal').classList.remove('open');await renderCompSubs();};
+      document.getElementById('no').onclick=async()=>{await updateDoc(doc(db,'completion_submissions',d.id),{status:'rejected',note:document.getElementById('note').value.trim()||'Отклонено модератором',reviewedBy:meRef.uid,reviewedAt:serverTimestamp()});document.getElementById('modal').classList.remove('open');await renderCompSubs();};
+    };
+    box.appendChild(card);
+  });
+}
+
+onAuthStateChanged(auth, async user=>{
+  if(!user) return location.href='index.html';
+  try {
+    const me=await getDoc(doc(db,'users',user.uid));
+    const my=me.exists()?me.data():null;
+    if(!my||my.situation!=='verified') return location.href='nick.html';
+    if(my.role!=='moderator'&&my.role!=='elder') return location.href='main.html';
+    meRef={uid:user.uid,nick:my.nick??'moderator'};
+    await loadScoring(); await loadLevels(); await renderLevelSubs(); await renderCompSubs();
+    statusEl.textContent='';
+  } catch(e){console.error(e);statusEl.textContent=getNetworkErrorMessage(e);}
+});
+</script>
+</body>
+</html>

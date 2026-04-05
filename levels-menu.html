@@ -1,26 +1,46 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>Меню уровней (перенесено)</title>
+<title>Меню уровней</title>
 <link rel="stylesheet" href="hud.css">
 </head>
 <body>
-<div class="hud" style="max-width:760px;margin:50px auto;">
+<div class="hud" style="max-width:780px">
   <div class="page-header">
-    <h1 style="margin:0;">Меню уровней</h1>
-    <button id="back" class="btn-ghost">Назад на главную</button>
-  </div>
-  <p id="status" style="color:#00ffff;">Меню перенесено на страницу листа.</p>
-  <div class="top-actions">
-    <button id="goNewMenu" class="btn-hero">Открыть меню на странице листа</button>
+    <h1>Меню уровней</h1>
+    <button id="back" class="btn-ghost">Назад</button>
   </div>
 
+  <div class="top-actions">
+    <button id="a">Отправить новый уровень</button>
+    <button id="b">Отправить прохождение</button>
+    <button id="c">Подать апелляцию</button>
+    <button id="d">История отправок</button>
+  </div>
 </div>
 
 <script type="module">
-document.getElementById('goNewMenu').onclick = ()=> location.href='leaderboard.html#menu';
-back.onclick = ()=> location.href='main.html';
+import { auth, db, getNetworkErrorMessage } from './firebase.js';
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
+import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+
+onAuthStateChanged(auth, async user=>{
+  if(!user) return location.href='index.html';
+  try {
+    const me = await getDoc(doc(db,'users',user.uid));
+    const data = me.exists()?me.data():null;
+    if(!data || data.situation!=='verified') return location.href='nick.html';
+  } catch (e) {
+    alert(getNetworkErrorMessage(e));
+  }
+});
+
+document.getElementById('a').onclick=()=>location.href='submit-level.html';
+document.getElementById('b').onclick=()=>location.href='submit-completion.html';
+document.getElementById('c').onclick=()=>location.href='submit-appeal.html';
+document.getElementById('d').onclick=()=>location.href='my-submissions.html';
+document.getElementById('back').onclick=()=>location.href='main.html';
 </script>
 </body>
 </html>
