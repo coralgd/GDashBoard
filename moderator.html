@@ -2,17 +2,9 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>Moderator Panel</title>
+<title>Панель модератора</title>
 <link rel="stylesheet" href="hud.css">
-<style>
-  .panel{display:none;margin-top:14px}
-  .panel.active{display:block}
-  .row{border:1px solid #2d8cff55;background:rgba(0,20,50,.35);padding:12px;border-radius:10px;margin-bottom:12px}
-  .row input,.row textarea,.row select{width:100%;margin:6px 0}
-  .small{font-size:12px;opacity:.85}
-  .folder{cursor:pointer}
-  .path{margin:8px 0}
-</style>
+<style>.panel{display:none;margin-top:14px}.panel.active{display:block}</style>
 </head>
 <body>
 <div class="hud" style="max-width:1100px;margin:40px auto;">
@@ -57,116 +49,150 @@ async function clearUserHistory(uid){
 
 async function loadUsersTab(){
   const box = document.getElementById('users');
-  box.innerHTML = 'Загрузка аккаунтов...';
   const snap = await getDocs(collection(db,'users'));
-  box.innerHTML = '';
-
   const rows = [];
   snap.forEach(d=>rows.push({id:d.id, ...d.data()}));
   rows.sort((a,b)=>String(a.nick ?? '').localeCompare(String(b.nick ?? ''), 'ru'));
 
-  if(!rows.length){ box.innerHTML='<p>Пусто.</p>'; return; }
+  box.innerHTML = `
+    <label>Поиск игрока / роли / почты</label>
+    <input id="userSearch" placeholder="Например: player, ivan, @mail">
+    <div id="userList"></div>
+  `;
 
-  rows.forEach(u=>{
-    const row = document.createElement('div');
-    row.className = 'row';
-    const locked = u.id===me.uid || u.role==='moderator' || u.role==='elder';
-    row.innerHTML = `
-      <b>${u.nick ?? 'Без ника'}</b>
-      <p class="small">${u.email ?? '—'} · role=${u.role ?? 'player'} · points=${Number(u.points ?? 0)}</p>
-      <button class="btn-danger del" ${locked ? 'disabled' : ''}>Удалить аккаунт</button>
-      <p class="small">${locked ? 'Защищенный аккаунт' : 'Удаляет профиль и отправки пользователя'}</p>
-    `;
+  const list = document.getElementById('userList');
+  const render = ()=>{
+    const q = document.getElementById('userSearch').value.trim().toLowerCase();
+    list.innerHTML = '';
+    const filtered = rows.filter(u=>`${u.nick ?? ''} ${u.role ?? ''} ${u.email ?? ''}`.toLowerCase().includes(q));
+    if(!filtered.length){ list.innerHTML='<p>Пусто.</p>'; return; }
 
-    row.querySelector('.del').onclick = async ()=>{
-      if(!confirm(`Удалить аккаунт ${u.nick ?? 'Без ника'}?`)) return;
-      try {
-        await clearUserHistory(u.id);
-        await deleteDoc(doc(db,'users',u.id));
-        row.remove();
-      } catch (e) {
-        alert(getNetworkErrorMessage(e));
-      }
-    };
-    box.appendChild(row);
-  });
+    filtered.forEach(u=>{
+      const row = document.createElement('div');
+      row.className='card';
+      const locked = u.id===me.uid || u.role==='moderator' || u.role==='elder';
+      row.innerHTML = `
+        <b>${u.nick ?? 'Без ника'}</b>
+        <p class="small">Почта: ${u.email ?? '—'}</p>
+        <p class="small">Роль: ${u.role ?? 'player'} · Очки: ${Number(u.points ?? 0)}</p>
+        <p class="small">Кнопка удаляет профиль и все отправки игрока.</p>
+        <button class="btn-danger del" ${locked ? 'disabled' : ''}>Удалить аккаунт</button>
+      `;
+      row.querySelector('.del').onclick = async ()=>{
+        if(!confirm(`Удалить аккаунт ${u.nick ?? 'Без ника'}?`)) return;
+        try {
+          await clearUserHistory(u.id);
+          await deleteDoc(doc(db,'users',u.id));
+          row.remove();
+        } catch (e) {
+          alert(getNetworkErrorMessage(e));
+        }
+      };
+      list.appendChild(row);
+    });
+  };
+
+  document.getElementById('userSearch').oninput = render;
+  render();
 }
 
 async function loadPendingLevels(){
-  const box = document.getElementById('levels');
-  box.innerHTML='Загрузка заявок уровней...';
   const snap = await getDocs(query(collection(db,'level_submissions'), where('status','==','pending')));
-  if(snap.empty){ box.innerHTML='<p>Нет заявок.</p>'; return; }
-  box.innerHTML='';
+  const rows = [];
+  snap.forEach(d=>rows.push({id:d.id,...d.data()}));
 
-  snap.forEach(d=>{
-    const s=d.data();
-    const row=document.createElement('div');
-    row.className='row';
-    row.innerHTML=`
-      <b>${s.nick ?? 'Без ника'}</b>
-      <a href="${s.link ?? '#'}" target="_blank">Ссылка</a>
-      <p>${s.text ?? ''}</p>
-      <p class="small">ref: ${s.referenceSubmissionId ?? '—'}</p>
-      <input class="note" placeholder="Комментарий">
-      <input class="rank" type="number" min="1" placeholder="Место">
-      <div class="top-actions"><button class="ok">Одобрить</button><button class="no btn-danger">Отклонить</button></div>
-    `;
+  const box = document.getElementById('levels');
+  box.innerHTML = `
+    <label>Поиск по нику / тексту / ссылке</label>
+    <input id="levelSearch" placeholder="Например: demon, memory, youtube">
+    <div id="levelList"></div>
+  `;
 
-    row.querySelector('.ok').onclick = async ()=>{
-      const rank=Number(row.querySelector('.rank').value);
-      if(!rank) return alert('Укажи место');
-      await addDoc(collection(db,'levels'),{link:s.link ?? '',text:s.text ?? '',fileUrl:s.fileUrl ?? '',rank,status:'active',addedBy:me.uid,addedByNick:me.nick ?? 'moderator',createdAt:serverTimestamp(),sourceSubmissionId:d.id});
-      await updateDoc(doc(db,'level_submissions',d.id),{status:'approved',note:row.querySelector('.note').value.trim(),reviewedBy:me.uid,reviewedAt:serverTimestamp(),finalRank:rank});
-      row.remove();
-      await loadArchive();
-    };
+  const list = document.getElementById('levelList');
+  const render = ()=>{
+    const q = document.getElementById('levelSearch').value.trim().toLowerCase();
+    list.innerHTML = '';
+    const filtered = rows.filter(s=>`${s.nick ?? ''} ${s.text ?? ''} ${s.link ?? ''} ${s.referenceSubmissionId ?? ''}`.toLowerCase().includes(q));
+    if(!filtered.length){ list.innerHTML='<p>Нет заявок.</p>'; return; }
 
-    row.querySelector('.no').onclick = async ()=>{
-      await updateDoc(doc(db,'level_submissions',d.id),{status:'rejected',note:row.querySelector('.note').value.trim() || 'Отклонено',reviewedBy:me.uid,reviewedAt:serverTimestamp()});
-      row.remove();
-      await loadArchive();
-    };
+    filtered.forEach(s=>{
+      const row=document.createElement('div');
+      row.className='card';
+      row.innerHTML=`
+        <b>${s.nick ?? 'Без ника'}</b>
+        <p><a href="${s.link ?? '#'}" target="_blank">Открыть ссылку</a></p>
+        <p>${s.text ?? ''}</p>
+        <p class="small">ref: ${s.referenceSubmissionId ?? '—'} · Что меняет место: поле «Место» ниже.</p>
+        <label>Комментарий модератора (что меняет: note)</label>
+        <input class="note" placeholder="Причина решения">
+        <label>Место в листе (что меняет: rank/finalRank)</label>
+        <input class="rank" type="number" min="1" placeholder="Например: 12">
+        <div class="top-actions"><button class="ok">Одобрить</button><button class="no btn-danger">Отклонить</button></div>
+      `;
+      row.querySelector('.ok').onclick = async ()=>{
+        const rank=Number(row.querySelector('.rank').value);
+        if(!rank) return alert('Укажи место');
+        await addDoc(collection(db,'levels'),{link:s.link ?? '',text:s.text ?? '',fileUrl:s.fileUrl ?? '',rank,status:'active',addedBy:me.uid,addedByNick:me.nick ?? 'moderator',createdAt:serverTimestamp(),sourceSubmissionId:s.id});
+        await updateDoc(doc(db,'level_submissions',s.id),{status:'approved',note:row.querySelector('.note').value.trim(),reviewedBy:me.uid,reviewedAt:serverTimestamp(),finalRank:rank});
+        row.remove();
+      };
+      row.querySelector('.no').onclick = async ()=>{
+        await updateDoc(doc(db,'level_submissions',s.id),{status:'rejected',note:row.querySelector('.note').value.trim() || 'Отклонено',reviewedBy:me.uid,reviewedAt:serverTimestamp()});
+        row.remove();
+      };
+      list.appendChild(row);
+    });
+  };
 
-    box.appendChild(row);
-  });
+  document.getElementById('levelSearch').oninput = render;
+  render();
 }
 
 async function loadPendingCompletions(){
-  const box = document.getElementById('completions');
-  box.innerHTML='Загрузка заявок прохождений...';
   const snap = await getDocs(query(collection(db,'completion_submissions'), where('status','==','pending')));
-  if(snap.empty){ box.innerHTML='<p>Нет заявок.</p>'; return; }
-  box.innerHTML='';
+  const rows = [];
+  snap.forEach(d=>rows.push({id:d.id,...d.data()}));
 
-  box.innerHTML='';
-  snap.forEach(d=>{
-    const s=d.data();
-    const row=document.createElement('div');
-    row.className='row';
-    row.innerHTML=`
-      <b>${s.nick ?? 'Без ника'}</b>
-      <a href="${s.link ?? '#'}" target="_blank">Доказательство</a>
-      <p>${s.text ?? ''}</p>
-      <p class="small">ref: ${s.referenceSubmissionId ?? '—'}</p>
-      <input class="note" placeholder="Комментарий">
-      <div class="top-actions"><button class="ok">Одобрить</button><button class="no btn-danger">Отклонить</button></div>
-    `;
+  const box = document.getElementById('completions');
+  box.innerHTML = `
+    <label>Поиск по нику / тексту / ссылке</label>
+    <input id="compSearch" placeholder="Например: player, level name, link">
+    <div id="compList"></div>
+  `;
 
-    row.querySelector('.ok').onclick = async ()=>{
-      await updateDoc(doc(db,'completion_submissions',d.id),{status:'approved',note:row.querySelector('.note').value.trim(),reviewedBy:me.uid,reviewedAt:serverTimestamp()});
-      row.remove();
-      await loadArchive();
-    };
+  const list = document.getElementById('compList');
+  const render = ()=>{
+    const q = document.getElementById('compSearch').value.trim().toLowerCase();
+    list.innerHTML = '';
+    const filtered = rows.filter(s=>`${s.nick ?? ''} ${s.text ?? ''} ${s.link ?? ''} ${s.referenceSubmissionId ?? ''}`.toLowerCase().includes(q));
+    if(!filtered.length){ list.innerHTML='<p>Нет заявок.</p>'; return; }
 
-    row.querySelector('.no').onclick = async ()=>{
-      await updateDoc(doc(db,'completion_submissions',d.id),{status:'rejected',note:row.querySelector('.note').value.trim() || 'Отклонено',reviewedBy:me.uid,reviewedAt:serverTimestamp()});
-      row.remove();
-      await loadArchive();
-    };
+    filtered.forEach(s=>{
+      const row=document.createElement('div');
+      row.className='card';
+      row.innerHTML=`
+        <b>${s.nick ?? 'Без ника'}</b>
+        <p><a href="${s.link ?? '#'}" target="_blank">Открыть доказательство</a></p>
+        <p>${s.text ?? ''}</p>
+        <p class="small">ref: ${s.referenceSubmissionId ?? '—'} · Что меняет комментарий: поле «Комментарий» ниже.</p>
+        <label>Комментарий модератора (что меняет: note)</label>
+        <input class="note" placeholder="Комментарий к решению">
+        <div class="top-actions"><button class="ok">Одобрить</button><button class="no btn-danger">Отклонить</button></div>
+      `;
+      row.querySelector('.ok').onclick = async ()=>{
+        await updateDoc(doc(db,'completion_submissions',s.id),{status:'approved',note:row.querySelector('.note').value.trim(),reviewedBy:me.uid,reviewedAt:serverTimestamp()});
+        row.remove();
+      };
+      row.querySelector('.no').onclick = async ()=>{
+        await updateDoc(doc(db,'completion_submissions',s.id),{status:'rejected',note:row.querySelector('.note').value.trim() || 'Отклонено',reviewedBy:me.uid,reviewedAt:serverTimestamp()});
+        row.remove();
+      };
+      list.appendChild(row);
+    });
+  };
 
-    box.appendChild(row);
-  });
+  document.getElementById('compSearch').oninput = render;
+  render();
 }
 
 function renderArchiveSection(title, items){

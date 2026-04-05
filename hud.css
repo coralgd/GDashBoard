@@ -1,11 +1,11 @@
-@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600&family=Inter:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700&family=Inter:wght@400;500;600&display=swap');
 
 * { box-sizing: border-box; }
 
 body {
   margin: 0;
   font-family: 'Orbitron', 'Inter', sans-serif;
-  background: radial-gradient(circle at top, #0c1420, #05080e);
+  background: radial-gradient(circle at top, #0c1420 0%, #05080e 55%, #03050a 100%);
   color: #d8f2ff;
   min-height: 100vh;
   overflow-x: hidden;
@@ -17,22 +17,16 @@ body > * {
   z-index: 1;
 }
 
-/* GRID BACKGROUND (PERSPECTIVE, MOVING TOWARDS VIEWER) */
+/* SIMPLE MOVING GRID BACKGROUND */
 body::before {
   content: "";
   position: fixed;
-  left: -25vw;
-  right: -25vw;
-  bottom: -72vh;
-  height: 240vh;
+  inset: 0;
   background:
-    repeating-linear-gradient(to right, rgba(0,180,255,0.22) 0 2px, transparent 2px 86px),
-    repeating-linear-gradient(to bottom, rgba(0,180,255,0.18) 0 2px, transparent 2px 72px);
-  transform-origin: bottom center;
-  transform: perspective(980px) rotateX(74deg) translateY(0);
-  animation: gridApproach 7.5s linear infinite;
+    repeating-linear-gradient(to right, rgba(0,180,255,0.16) 0 1px, transparent 1px 46px),
+    repeating-linear-gradient(to bottom, rgba(0,180,255,0.12) 0 1px, transparent 1px 46px);
+  animation: gridSide 18s linear infinite;
   z-index: 0;
-  opacity: 0.55;
   pointer-events: none;
 }
 
@@ -40,50 +34,41 @@ body::after {
   content: "";
   position: fixed;
   inset: 0;
-  background:
-    radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.45) 100%),
-    linear-gradient(to top, rgba(3,8,16,0.82), rgba(3,8,16,0.15) 45%, transparent 85%);
+  background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.35) 100%);
   z-index: 0;
   pointer-events: none;
 }
 
-@keyframes gridApproach {
-  from { transform: perspective(980px) rotateX(74deg) translateY(0); }
-  to   { transform: perspective(980px) rotateX(74deg) translateY(72px); }
+@keyframes gridSide {
+  from { background-position: 0 0, 0 0; }
+  to   { background-position: 120px 0, 0 120px; }
 }
 
-/* HUD PANEL */
 .hud {
   position: relative;
   background: linear-gradient(180deg, rgba(18,30,50,0.9), rgba(6,10,18,0.96));
   border: 1px solid rgba(0,160,255,0.35);
   border-radius: 16px;
   padding: 22px;
-  box-shadow: 0 0 40px rgba(0,120,255,0.18);
+  box-shadow: 0 0 40px rgba(0,120,255,0.18), inset 0 0 30px rgba(0,130,220,0.1);
   overflow: hidden;
 }
 
-/* METALLIC SHINE */
 .hud::after {
   content: "";
   position: absolute;
   inset: 0;
-  background: linear-gradient(
-    110deg,
-    transparent 0%,
-    rgba(255,255,255,0.08) 45%,
-    rgba(255,255,255,0.14) 50%,
-    rgba(255,255,255,0.08) 55%,
-    transparent 100%
-  );
-  opacity: 0.35;
+  background: linear-gradient(110deg, transparent 0%, rgba(255,255,255,0.07) 45%, rgba(255,255,255,0.13) 50%, rgba(255,255,255,0.07) 55%, transparent 100%);
+  opacity: 0.28;
   pointer-events: none;
 }
 
-h1,h2 {
+h1,h2,h3 {
   letter-spacing: 0.08em;
   text-shadow: 0 0 10px rgba(0,160,255,0.5);
 }
+
+p { line-height: 1.45; }
 
 button {
   background: linear-gradient(135deg, #0ab0ff, #0076ff);
@@ -100,31 +85,42 @@ button {
 
 button:hover {
   transform: translateY(-1px);
-  filter: brightness(1.05);
+  filter: brightness(1.08);
   box-shadow: 0 0 24px rgba(0,170,255,0.62);
 }
 
 input, textarea, select {
-  background: rgba(0,0,0,0.5);
+  background: rgba(0,0,0,0.45);
   border: 1px solid rgba(0,160,255,0.45);
   border-radius: 8px;
-  padding: 8px;
+  padding: 9px 10px;
   color: #dff4ff;
   font-family: 'Orbitron', 'Inter', sans-serif;
 }
 
+label { display: block; margin-bottom: 4px; font-size: 12px; color: #97d9ff; }
+
 .row {
   display: grid;
-  grid-template-columns: 60px 1fr 120px;
+  grid-template-columns: 60px 1fr 140px;
   padding: 12px;
   border-bottom: 1px solid rgba(0,160,255,0.18);
   gap: 8px;
   align-items: center;
 }
 
+.list-item {
+  border: 1px solid rgba(0,170,255,0.3);
+  border-radius: 10px;
+  background: rgba(5,18,35,0.45);
+  margin-bottom: 8px;
+}
+
+.small { font-size: 12px; opacity: .82; }
 .me { outline: 2px solid #00aaff; }
 .moderator { color: #7ccfff; }
-.elder { color: #ff4d4d; }
+.elder { color: #ff6f6f; }
+.clickable { cursor: pointer; }
 
 .top-actions {
   display: flex;
@@ -132,17 +128,6 @@ input, textarea, select {
   gap: 10px;
   margin: 12px 0;
 }
-
-.menu-panel {
-  margin-top: 10px;
-  padding: 12px;
-  border: 1px solid rgba(0,160,255,0.28);
-  border-radius: 10px;
-  background: rgba(0,20,45,0.35);
-  display: none;
-}
-
-.menu-panel.open { display: block; }
 
 .menu-grid {
   display: grid;
@@ -157,28 +142,12 @@ input, textarea, select {
   background: rgba(0,20,45,0.35);
 }
 
-.btn-danger {
-  background: linear-gradient(135deg, #ff5e7a, #ff2f62);
-  color: #1f0010;
-}
+.page-header { display:flex; align-items:center; justify-content:space-between; gap:10px; }
 
-.btn-success {
-  background: linear-gradient(135deg, #20f5cc, #02caa1);
-  color: #001d16;
-}
-
-.btn-ghost {
-  background: transparent;
-  color: #9eddff;
-  border: 1px solid rgba(0,180,255,0.45);
-  box-shadow: none;
-}
-
-.btn-hero {
-  font-size: 16px;
-  padding: 14px 20px;
-  letter-spacing: .06em;
-}
+.btn-danger { background: linear-gradient(135deg, #ff5e7a, #ff2f62); color: #1f0010; }
+.btn-success { background: linear-gradient(135deg, #20f5cc, #02caa1); color: #001d16; }
+.btn-ghost { background: transparent; color: #9eddff; border: 1px solid rgba(0,180,255,0.45); box-shadow: none; }
+.btn-hero { font-size: 16px; padding: 14px 20px; letter-spacing: .06em; }
 
 .dialog-backdrop {
   position: fixed;
@@ -194,7 +163,7 @@ input, textarea, select {
 .dialog-backdrop.open { display: flex; }
 
 .dialog {
-  width: min(760px, 92vw);
+  width: min(820px, 92vw);
   border: 1px solid rgba(0,180,255,0.45);
   border-radius: 14px;
   padding: 16px;
@@ -203,7 +172,5 @@ input, textarea, select {
 }
 
 @media (max-width: 700px) {
-  .row {
-    grid-template-columns: 1fr;
-  }
+  .row { grid-template-columns: 1fr; }
 }
