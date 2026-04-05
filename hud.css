@@ -17,22 +17,16 @@ body > * {
   z-index: 1;
 }
 
-/* GLOBAL PERSPECTIVE GRID */
+/* SIMPLE MOVING GRID BACKGROUND */
 body::before {
   content: "";
   position: fixed;
-  left: -25vw;
-  right: -25vw;
-  bottom: -72vh;
-  height: 240vh;
+  inset: 0;
   background:
-    repeating-linear-gradient(to right, rgba(0,180,255,0.22) 0 2px, transparent 2px 86px),
-    repeating-linear-gradient(to bottom, rgba(0,180,255,0.18) 0 2px, transparent 2px 72px);
-  transform-origin: bottom center;
-  transform: perspective(980px) rotateX(74deg) translateY(0);
-  animation: gridApproach 7.5s linear infinite;
+    repeating-linear-gradient(to right, rgba(0,180,255,0.16) 0 1px, transparent 1px 46px),
+    repeating-linear-gradient(to bottom, rgba(0,180,255,0.12) 0 1px, transparent 1px 46px);
+  animation: gridSide 18s linear infinite;
   z-index: 0;
-  opacity: 0.55;
   pointer-events: none;
 }
 
@@ -40,16 +34,14 @@ body::after {
   content: "";
   position: fixed;
   inset: 0;
-  background:
-    radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.45) 100%),
-    linear-gradient(to top, rgba(3,8,16,0.82), rgba(3,8,16,0.15) 45%, transparent 85%);
+  background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.35) 100%);
   z-index: 0;
   pointer-events: none;
 }
 
-@keyframes gridApproach {
-  from { transform: perspective(980px) rotateX(74deg) translateY(0); }
-  to   { transform: perspective(980px) rotateX(74deg) translateY(72px); }
+@keyframes gridSide {
+  from { background-position: 0 0, 0 0; }
+  to   { background-position: 120px 0, 0 120px; }
 }
 
 .hud {
