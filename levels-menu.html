@@ -2,25 +2,45 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>Меню уровней (перенесено)</title>
+<title>Меню уровней</title>
 <link rel="stylesheet" href="hud.css">
 </head>
 <body>
-<div class="hud" style="max-width:760px;margin:50px auto;">
+<div class="hud" style="max-width:780px;margin:50px auto;">
   <div class="page-header">
     <h1 style="margin:0;">Меню уровней</h1>
-    <button id="back" class="btn-ghost">Назад на главную</button>
-  </div>
-  <p id="status" style="color:#00ffff;">Меню перенесено на страницу листа.</p>
-  <div class="top-actions">
-    <button id="goNewMenu" class="btn-hero">Открыть меню на странице листа</button>
+    <button id="back" class="btn-ghost">Назад</button>
   </div>
 
+  <p class="small">Подача заявок и просмотр своей истории.</p>
+
+  <div class="card">
+    <div class="menu-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+      <button id="goSubmitLevel">Отправить новый уровень</button>
+      <button id="goSubmitCompletion">Отправить прохождение</button>
+      <button id="goSubmitAppeal">Подать апелляцию</button>
+      <button id="goMySubmissions">История отправок</button>
+    </div>
+  </div>
 </div>
 
 <script type="module">
-document.getElementById('goNewMenu').onclick = ()=> location.href='leaderboard.html#menu';
-back.onclick = ()=> location.href='main.html';
+import { auth, db } from './firebase.js';
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
+import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+
+onAuthStateChanged(auth, async user => {
+  if(!user) return location.href='index.html';
+  const meSnap = await getDoc(doc(db,'users',user.uid));
+  const me = meSnap.exists() ? meSnap.data() : null;
+  if(!me || me.situation !== 'verified') return location.href='nick.html';
+});
+
+document.getElementById('goSubmitLevel').onclick = ()=> location.href='submit-level.html';
+document.getElementById('goSubmitCompletion').onclick = ()=> location.href='submit-completion.html';
+document.getElementById('goSubmitAppeal').onclick = ()=> location.href='submit-appeal.html';
+document.getElementById('goMySubmissions').onclick = ()=> location.href='my-submissions.html';
+document.getElementById('back').onclick = ()=> location.href='main.html';
 </script>
 </body>
 </html>

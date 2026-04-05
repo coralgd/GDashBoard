@@ -2,357 +2,267 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>Старший модератор</title>
+<title>Панель старшего модератора</title>
 <link rel="stylesheet" href="hud.css">
 <style>
-  .tabs button{margin-right:8px}
-  .panel{display:none;margin-top:14px}
-  .panel.active{display:block}
-  .row{border:1px solid #2d8cff55;background:rgba(0,20,50,.35);padding:10px;border-radius:8px;margin-bottom:10px}
-  .row input,.row textarea{width:100%;margin:6px 0}
-  .small{font-size:12px;opacity:.85}
+  .modal-section{display:none}
+  .modal-section.active{display:block}
 </style>
 </head>
 <body>
-<div class="hud" style="max-width:1100px;margin:40px auto;">
-  <h1>Панель старшего модератора</h1>
+<div class="hud" style="max-width:1120px;margin:36px auto;">
+  <div class="page-header">
+    <h1 style="margin:0;">Панель старшего модератора</h1>
+    <button id="backMain" class="btn-ghost">На главную</button>
+  </div>
   <p id="status" style="color:#00ffff;">Загрузка...</p>
 
-  <div class="tabs">
-    <button data-tab="users">Пользователи</button>
-    <button data-tab="settings">Параметры очков</button>
-    <button data-tab="appeals">Апелляции</button>
-    <button data-tab="levelSubmissions">Заявки уровней</button>
-    <button data-tab="completionSubmissions">Заявки прохождений</button>
-    <button data-tab="manualLevel">Поставить уровень</button>
+  <div class="top-actions">
+    <button id="goElderLevels" class="btn-hero">Меню листа</button>
   </div>
 
-  <div id="users" class="panel active"></div>
-  <div id="settings" class="panel">
-    <div class="row">
-      <b>Настройка формулы очков</b>
-      <input id="maximumPoints" type="number" step="1" min="1" placeholder="maximumPoints (например 100)">
-      <input id="rankDecayFactor" type="number" step="0.1" min="0" placeholder="rankDecayFactor (например 3)">
-      <input id="repeatPenaltyPower" type="number" step="0.01" min="0" placeholder="repeatPenaltyPower (например 0.5)">
-      <p class="small">Формула: points = maximumPoints * e^(-rankDecayFactor*x) * 1/(k^repeatPenaltyPower), x=(rank-1)/(quantity-1)</p>
-      <button id="saveSettings">Сохранить параметры</button>
-      <p id="settingsMsg" class="small"></p>
+  <h2>Игроки</h2>
+  <div class="row small"><div>#</div><div>Ник</div><div>Очки</div></div>
+  <div id="users"></div>
+</div>
+
+<div id="playerModal" class="dialog-backdrop">
+  <div class="dialog" style="width:min(980px,95vw)">
+    <div class="page-header">
+      <h2 id="playerTitle" style="margin:0;">Игрок</h2>
+      <button id="closeModal" class="btn-ghost">Закрыть</button>
     </div>
-  </div>
-  <div id="appeals" class="panel"></div>
-  <div id="levelSubmissions" class="panel"></div>
-  <div id="completionSubmissions" class="panel"></div>
-  <div id="manualLevel" class="panel">
-    <div class="row">
-      <b>Ручное добавление уровня в лист</b>
-      <input id="mLink" placeholder="Ссылка на уровень">
-      <textarea id="mText" placeholder="Описание"></textarea>
-      <input id="mFile" placeholder="Ссылка на файл (опционально)">
-      <input id="mRank" type="number" min="1" placeholder="Место в листе">
-      <button id="mAdd">Добавить в лист</button>
-      <p id="mMsg" class="small"></p>
-    </div>
+
+    <div id="profileSection" class="modal-section active"></div>
+    <div id="submissionsSection" class="modal-section"></div>
   </div>
 </div>
 
 <script type="module">
 import { auth, db } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import {
-  collection, query, orderBy, getDocs, doc, updateDoc, getDoc,
-  serverTimestamp, setDoc, where, addDoc
-} from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+import { collection, deleteDoc, doc, getDoc, getDocs, orderBy, query, updateDoc, where } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
 const statusEl = document.getElementById('status');
-function setTab(id){
-  document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
-  document.getElementById(id).classList.add('active');
-}
-document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
+const usersEl = document.getElementById('users');
+const modal = document.getElementById('playerModal');
+const profileSection = document.getElementById('profileSection');
+const submissionsSection = document.getElementById('submissionsSection');
 
-async function getScoring(){
-  const snap = await getDoc(doc(db,'settings','scoring'));
-  const s = snap.exists() ? snap.data() : {};
-  return {
-    maximumPoints: Number(s.maximumPoints ?? s.maxPoints ?? 100),
-    rankDecayFactor: Number(s.rankDecayFactor ?? s.decayA ?? 3),
-    repeatPenaltyPower: Number(s.repeatPenaltyPower ?? s.grindPower ?? 0.5)
+let current = null;
+let submissions = [];
+
+document.getElementById('backMain').onclick = ()=> location.href='main.html';
+document.getElementById('goElderLevels').onclick = ()=> location.href='elder-levels.html';
+document.getElementById('closeModal').onclick = ()=> modal.classList.remove('open');
+
+function section(name){
+  profileSection.classList.toggle('active', name === 'profile');
+  submissionsSection.classList.toggle('active', name === 'submissions');
+}
+
+async function clearHistory(userId){
+  const [a,b,c] = await Promise.all([
+    getDocs(query(collection(db,'level_submissions'), where('authorId','==',userId))),
+    getDocs(query(collection(db,'completion_submissions'), where('playerId','==',userId))),
+    getDocs(query(collection(db,'appeals'), where('playerId','==',userId)))
+  ]);
+  for(const d of a.docs) await deleteDoc(doc(db,'level_submissions',d.id));
+  for(const d of b.docs) await deleteDoc(doc(db,'completion_submissions',d.id));
+  for(const d of c.docs) await deleteDoc(doc(db,'appeals',d.id));
+}
+
+async function loadSubmissions(userId){
+  const [a,b,c] = await Promise.all([
+    getDocs(query(collection(db,'level_submissions'), where('authorId','==',userId))),
+    getDocs(query(collection(db,'completion_submissions'), where('playerId','==',userId))),
+    getDocs(query(collection(db,'appeals'), where('playerId','==',userId)))
+  ]);
+  const all = [];
+  a.forEach(d => all.push({ type:'level', ...d.data() }));
+  b.forEach(d => all.push({ type:'completion', ...d.data() }));
+  c.forEach(d => all.push({ type:'appeal', ...d.data() }));
+  return all;
+}
+
+function input(label, type = 'text'){
+  const l = document.createElement('label');
+  l.className = 'small';
+  l.textContent = label;
+  const i = document.createElement('input');
+  i.type = type;
+  return { label:l, input:i };
+}
+
+function renderSubmissions(){
+  const q = document.getElementById('sSearch').value.trim().toLowerCase();
+  const type = document.getElementById('sType').value;
+  const state = document.getElementById('sState').value;
+  const box = document.getElementById('sList');
+  box.innerHTML = '';
+
+  const filtered = submissions.filter(s => {
+    if(type !== 'all' && s.type !== type) return false;
+    if(state !== 'all' && s.status !== state) return false;
+    const hay = `${s.nick ?? ''} ${s.text ?? ''} ${s.status ?? ''} ${s.levelName ?? ''}`.toLowerCase();
+    return !q || hay.includes(q);
+  });
+
+  if(!filtered.length){ box.innerHTML = '<p>Отправки не найдены.</p>'; return; }
+
+  filtered.forEach((s, idx) => {
+    const row = document.createElement('div');
+    row.className = 'row list-item';
+    row.append(
+      Object.assign(document.createElement('div'), { textContent:String(idx + 1) }),
+      Object.assign(document.createElement('div'), { textContent:`[${s.type}] ${s.levelName ?? s.text ?? 'Без текста'}` }),
+      Object.assign(document.createElement('div'), { textContent:s.status ?? '—' })
+    );
+    box.appendChild(row);
+  });
+}
+
+async function openPlayer(user){
+  current = { ...user };
+  document.getElementById('playerTitle').textContent = current.nick ?? 'Игрок';
+  profileSection.innerHTML = '';
+  submissionsSection.innerHTML = '';
+
+  const nick = input('Ник');
+  nick.input.value = current.nick ?? '';
+  const email = input('Почта');
+  email.input.value = current.email ?? '';
+  email.input.readOnly = true;
+  const points = input('Очки', 'number');
+  points.input.value = String(Number(current.points ?? 0));
+
+  const roleLabel = document.createElement('label');
+  roleLabel.className = 'small';
+  roleLabel.textContent = 'Роль';
+  const role = document.createElement('select');
+  ['player','moderator','elder'].forEach(r => {
+    const option = document.createElement('option');
+    option.value = r;
+    option.textContent = r;
+    if((current.role ?? 'player') === r) option.selected = true;
+    role.appendChild(option);
+  });
+
+  const actions = document.createElement('div');
+  actions.className = 'top-actions';
+  const verify = document.createElement('button');
+  verify.textContent = current.situation === 'verified' ? 'Снять верификацию' : 'Верифицировать';
+  const openSub = document.createElement('button');
+  openSub.textContent = 'Отправки';
+  const clear = document.createElement('button');
+  clear.className = 'btn-danger';
+  clear.textContent = 'Очистить историю';
+  actions.append(verify, openSub, clear);
+
+  profileSection.append(nick.label, nick.input, email.label, email.input, points.label, points.input, roleLabel, role, actions);
+
+  nick.input.onchange = async ()=>{
+    const value = nick.input.value.trim();
+    await updateDoc(doc(db,'users',current.id), { nick:value });
+    current.nick = value;
+    document.getElementById('playerTitle').textContent = value || 'Игрок';
+    await renderUsers();
   };
+  points.input.onchange = async ()=>{
+    const value = Number(points.input.value || 0);
+    await updateDoc(doc(db,'users',current.id), { points:value });
+    current.points = value;
+    await renderUsers();
+  };
+  role.onchange = async ()=>{
+    await updateDoc(doc(db,'users',current.id), { role:role.value });
+    current.role = role.value;
+    await renderUsers();
+  };
+  verify.onclick = async ()=>{
+    const next = current.situation === 'verified' ? 'not requested' : 'verified';
+    await updateDoc(doc(db,'users',current.id), { situation:next });
+    current.situation = next;
+    verify.textContent = next === 'verified' ? 'Снять верификацию' : 'Верифицировать';
+    await renderUsers();
+  };
+  clear.onclick = async ()=>{
+    if(!confirm('Удалить все отправки игрока?')) return;
+    await clearHistory(current.id);
+    submissions = [];
+    alert('История очищена.');
+  };
+
+  submissionsSection.innerHTML = `
+    <div class="top-actions"><button id="backProfile" class="btn-ghost">Назад к профилю</button></div>
+    <div class="toolbar">
+      <input id="sSearch" placeholder="Поиск отправок">
+      <select id="sType">
+        <option value="all">Все типы</option>
+        <option value="level">Уровни</option>
+        <option value="completion">Прохождения</option>
+        <option value="appeal">Апелляции</option>
+      </select>
+      <select id="sState">
+        <option value="all">Все статусы</option>
+        <option value="approved">Только успешные</option>
+        <option value="pending">Ожидают</option>
+        <option value="rejected">Отклонённые</option>
+      </select>
+    </div>
+    <div id="sList"></div>
+  `;
+  document.getElementById('backProfile').onclick = ()=> section('profile');
+  document.getElementById('sSearch').oninput = renderSubmissions;
+  document.getElementById('sType').onchange = renderSubmissions;
+  document.getElementById('sState').onchange = renderSubmissions;
+
+  openSub.onclick = async ()=>{
+    openSub.disabled = true;
+    submissions = await loadSubmissions(current.id);
+    renderSubmissions();
+    section('submissions');
+    openSub.disabled = false;
+  };
+
+  section('profile');
+  modal.classList.add('open');
 }
 
-function calculateCompletionPoints(listRank, listSize, approvedCompletionsCount, scoringSettings){
-  let normalizedListSize = listSize;
-  if(!normalizedListSize || normalizedListSize < 2) normalizedListSize = 2;
-
-  let normalizedRank = listRank;
-  if(normalizedRank < 1) normalizedRank = 1;
-  if(normalizedRank > normalizedListSize) normalizedRank = normalizedListSize;
-
-  const normalizedPosition = (normalizedRank - 1) / (normalizedListSize - 1);
-  const positionScore = scoringSettings.maximumPoints * Math.exp(-scoringSettings.rankDecayFactor * normalizedPosition);
-  const antiGrindMultiplier = 1 / Math.pow(Math.max(1, approvedCompletionsCount), scoringSettings.repeatPenaltyPower);
-  return Math.round(positionScore * antiGrindMultiplier * 100) / 100;
-}
-
-async function loadUsers(){
-  const box = document.getElementById('users');
-  box.innerHTML = 'Загрузка пользователей...';
+async function renderUsers(){
+  usersEl.innerHTML = 'Загрузка игроков...';
   const snap = await getDocs(query(collection(db,'users'), orderBy('points','desc')));
-  if(snap.empty){ box.innerHTML='<p>Нет пользователей.</p>'; return; }
+  usersEl.innerHTML = '';
 
-  box.innerHTML='';
-  snap.forEach(d=>{
+  let i = 1;
+  snap.forEach(d => {
     const u = d.data();
     const row = document.createElement('div');
-    row.className='row';
-    row.innerHTML = `
-      <b>${u.nick ?? 'Без ника'}</b> · роль: ${u.role ?? 'player'} · вериф: ${u.situation ?? 'not requested'}<br>
-      <input type="number" value="${u.points ?? 0}" class="points">
-      <button class="savePoints">Сохранить баллы</button>
-      <button class="toggleRole">${u.role==='moderator'?'Снять модерку':'Назначить модером'}</button>
-      <button class="toggleVer">${u.situation==='verified'?'Снять верификацию':'Верифицировать'}</button>
-    `;
-    box.appendChild(row);
+    row.className = 'row list-item clickable';
+    if(u.role === 'moderator') row.classList.add('moderator');
+    if(u.role === 'elder') row.classList.add('elder');
+    if(u.situation !== 'verified') row.classList.add('unverified');
 
-    const roleBtn = row.querySelector('.toggleRole');
-    const verBtn = row.querySelector('.toggleVer');
-    const paintButtons = ()=>{
-      roleBtn.className = `toggleRole ${u.role==='moderator'?'btn-danger':''}`.trim();
-      verBtn.className = `toggleVer ${u.situation==='verified'?'btn-danger':''}`.trim();
-    };
-    paintButtons();
+    row.append(
+      Object.assign(document.createElement('div'), { textContent:String(i++) }),
+      Object.assign(document.createElement('div'), { textContent:u.nick ?? 'Без ника' }),
+      Object.assign(document.createElement('div'), { textContent:String(Number(u.points ?? 0)) })
+    );
 
-    row.querySelector('.savePoints').onclick = async ()=>{
-      await updateDoc(doc(db,'users',d.id), { points:Number(row.querySelector('.points').value) });
-    };
-    roleBtn.onclick = async ()=>{
-      const newRole = u.role==='moderator' ? 'player' : 'moderator';
-      await updateDoc(doc(db,'users',d.id), { role:newRole });
-      u.role = newRole;
-      roleBtn.textContent = u.role==='moderator'?'Снять модерку':'Назначить модером';
-      paintButtons();
-    };
-    verBtn.onclick = async ()=>{
-      const newSit = u.situation==='verified' ? 'not requested' : 'verified';
-      await updateDoc(doc(db,'users',d.id), { situation:newSit });
-      u.situation = newSit;
-      verBtn.textContent = u.situation==='verified'?'Снять верификацию':'Верифицировать';
-      paintButtons();
-    };
+    row.onclick = ()=> openPlayer({ id:d.id, ...u });
+    usersEl.appendChild(row);
   });
 }
 
-async function loadSettings(){
-  const snap = await getDoc(doc(db,'settings','scoring'));
-  const s = snap.exists() ? snap.data() : {};
-  document.getElementById('maximumPoints').value = s.maximumPoints ?? s.maxPoints ?? 100;
-  document.getElementById('rankDecayFactor').value = s.rankDecayFactor ?? s.decayA ?? 3;
-  document.getElementById('repeatPenaltyPower').value = s.repeatPenaltyPower ?? s.grindPower ?? 0.5;
-}
-
-async function loadAppeals(elderUid){
-  const box = document.getElementById('appeals');
-  box.innerHTML = 'Загрузка апелляций...';
-  const snap = await getDocs(query(collection(db,'appeals'), where('status','==','pending')));
-  if(snap.empty){ box.innerHTML='<p>Нет апелляций.</p>'; return; }
-  box.innerHTML='';
-
-  snap.forEach(d=>{
-    const a = d.data();
-    const row = document.createElement('div');
-    row.className='row';
-    row.innerHTML = `
-      <b>${a.nick ?? 'Без ника'}</b><br>
-      <p>${a.text ?? ''}</p>
-      <p class="small">Ссылка: ${a.link || '—'} | Файл: ${a.fileUrl || '—'}</p>
-      <input class="note" placeholder="Ответ старшего модератора">
-      <button class="approve">Удовлетворить</button>
-      <button class="reject">Отклонить</button>
-    `;
-    box.appendChild(row);
-
-    row.querySelector('.approve').onclick = async ()=>{
-      const note = row.querySelector('.note').value.trim() || 'Апелляция удовлетворена';
-      await updateDoc(doc(db,'appeals',d.id), {
-        status:'approved', note, reviewedBy:elderUid, reviewedAt:serverTimestamp()
-      });
-      row.remove();
-    };
-    row.querySelector('.reject').onclick = async ()=>{
-      const note = row.querySelector('.note').value.trim() || 'Апелляция отклонена';
-      await updateDoc(doc(db,'appeals',d.id), {
-        status:'rejected', note, reviewedBy:elderUid, reviewedAt:serverTimestamp()
-      });
-      row.remove();
-    };
-  });
-}
-
-async function loadLevelSubmissions(elder){
-  const box = document.getElementById('levelSubmissions');
-  box.innerHTML = 'Загрузка заявок уровней...';
-  const snap = await getDocs(query(collection(db,'level_submissions'), where('status','==','pending')));
-  if(snap.empty){ box.innerHTML='<p>Нет заявок.</p>'; return; }
-  box.innerHTML = '';
-
-  snap.forEach(d=>{
-    const s = d.data();
-    const row = document.createElement('div');
-    row.className='row';
-    row.innerHTML = `
-      <b>${s.nick ?? 'Без ника'}</b><br>
-      <a href="${s.link}" target="_blank">Ссылка</a>
-      <p>${s.text ?? ''}</p>
-      <p class="small">Файл: ${s.fileUrl || '—'}</p>
-      <input placeholder="Комментарий" class="note">
-      <input type="number" min="1" placeholder="Место в листе" class="rank">
-      <div class="top-actions">
-        <button class="approve">Одобрить и поставить в лист</button>
-        <button class="reject btn-danger">Отклонить</button>
-      </div>
-    `;
-    box.appendChild(row);
-
-    row.querySelector('.approve').onclick = async ()=>{
-      const note = row.querySelector('.note').value.trim();
-      const rank = Number(row.querySelector('.rank').value);
-      if(!rank){ alert('Укажи место'); return; }
-      await addDoc(collection(db,'levels'), {
-        link:s.link, text:s.text ?? '', fileUrl:s.fileUrl ?? '', rank,
-        addedBy:elder.uid, addedByNick:elder.nick ?? 'elder', createdAt:serverTimestamp(),
-        sourceSubmissionId:d.id, status:'active'
-      });
-      await updateDoc(doc(db,'level_submissions',d.id), {
-        status:'approved', note, reviewedBy:elder.uid, reviewedAt:serverTimestamp(), finalRank:rank
-      });
-      row.remove();
-    };
-
-    row.querySelector('.reject').onclick = async ()=>{
-      const note = row.querySelector('.note').value.trim() || 'Отклонено старшим модератором';
-      await updateDoc(doc(db,'level_submissions',d.id), {
-        status:'rejected', note, reviewedBy:elder.uid, reviewedAt:serverTimestamp()
-      });
-      row.remove();
-    };
-  });
-}
-
-async function loadCompletionSubmissions(elder){
-  const box = document.getElementById('completionSubmissions');
-  box.innerHTML = 'Загрузка заявок прохождений...';
-  const snap = await getDocs(query(collection(db,'completion_submissions'), where('status','==','pending')));
-  if(snap.empty){ box.innerHTML='<p>Нет заявок.</p>'; return; }
-
-  const levelsSnap = await getDocs(collection(db,'levels'));
-  const levels = [];
-  levelsSnap.forEach(d=>levels.push({id:d.id, ...d.data()}));
-  const quantity = Math.max(levels.length, 2);
-  const scoreCfg = await getScoring();
-  box.innerHTML = '';
-
-  snap.forEach(d=>{
-    const s = d.data();
-    const row = document.createElement('div');
-    row.className='row';
-    row.innerHTML = `
-      <b>${s.nick ?? 'Без ника'}</b><br>
-      <a href="${s.link}" target="_blank">Доказательство</a>
-      <p>${s.text ?? ''}</p>
-      <p class="small">Файл: ${s.fileUrl || '—'}</p>
-      <input type="number" min="1" max="${quantity}" placeholder="Место уровня в листе" class="rank">
-      <input placeholder="Комментарий" class="note">
-      <div class="top-actions">
-        <button class="approve">Подтвердить прохождение</button>
-        <button class="reject btn-danger">Отклонить</button>
-      </div>
-    `;
-    box.appendChild(row);
-
-    row.querySelector('.approve').onclick = async ()=>{
-      const note = row.querySelector('.note').value.trim();
-      const rank = Number(row.querySelector('.rank').value);
-      if(!rank){ alert('Укажи место уровня'); return; }
-
-      const userRef = doc(db,'users',s.playerId);
-      const userSnap = await getDoc(userRef);
-      const u = userSnap.exists() ? userSnap.data() : null;
-      if(!u){ alert('Игрок не найден'); return; }
-
-      const userComps = await getDocs(query(collection(db,'completion_submissions'), where('playerId','==',s.playerId)));
-      let approvedCount = 0;
-      userComps.forEach(x=>{ if(x.data().status==='approved') approvedCount++; });
-      const k = approvedCount + 1;
-      const earned = calculateCompletionPoints(rank, quantity, k, scoreCfg);
-
-      await updateDoc(userRef, { points:Number(u.points ?? 0) + earned });
-      await updateDoc(doc(db,'completion_submissions',d.id), {
-        status:'approved', note, reviewedBy:elder.uid, reviewedAt:serverTimestamp(),
-        awardedPoints:earned, listRank:rank, listQuantity:quantity, scoreK:k
-      });
-      row.remove();
-    };
-
-    row.querySelector('.reject').onclick = async ()=>{
-      const note = row.querySelector('.note').value.trim() || 'Отклонено старшим модератором';
-      await updateDoc(doc(db,'completion_submissions',d.id), {
-        status:'rejected', note, reviewedBy:elder.uid, reviewedAt:serverTimestamp()
-      });
-      row.remove();
-    };
-  });
-}
-
-onAuthStateChanged(auth, async user=>{
+onAuthStateChanged(auth, async user => {
   if(!user) return location.href='index.html';
+  const meSnap = await getDoc(doc(db,'users',user.uid));
+  const me = meSnap.exists() ? meSnap.data() : null;
+  if(!me || me.situation !== 'verified') return location.href='nick.html';
+  if(me.role !== 'elder') return location.href='main.html';
 
-  try {
-    const meSnap = await getDoc(doc(db,'users',user.uid));
-    const me = meSnap.exists() ? meSnap.data() : null;
-    if(!me || me.situation!=='verified') return location.href='nick.html';
-    if(me.role!=='elder') return location.href='main.html';
-
-    await Promise.all([
-      loadUsers(),
-      loadSettings(),
-      loadAppeals(user.uid),
-      loadLevelSubmissions({uid:user.uid, nick:me.nick}),
-      loadCompletionSubmissions({uid:user.uid, nick:me.nick})
-    ]);
-    statusEl.textContent = '';
-
-    document.getElementById('saveSettings').onclick = async ()=>{
-      const maximumPoints = Number(document.getElementById('maximumPoints').value);
-      const rankDecayFactor = Number(document.getElementById('rankDecayFactor').value);
-      const repeatPenaltyPower = Number(document.getElementById('repeatPenaltyPower').value);
-      const msg = document.getElementById('settingsMsg');
-      await setDoc(doc(db,'settings','scoring'), {
-        maximumPoints, rankDecayFactor, repeatPenaltyPower,
-        // backward-compatible aliases
-        maxPoints: maximumPoints, decayA: rankDecayFactor, grindPower: repeatPenaltyPower,
-        updatedBy:user.uid, updatedAt:serverTimestamp()
-      }, { merge:true });
-      msg.textContent = 'Параметры сохранены.';
-    };
-
-    document.getElementById('mAdd').onclick = async ()=>{
-      const link = document.getElementById('mLink').value.trim();
-      const text = document.getElementById('mText').value.trim();
-      const fileUrl = document.getElementById('mFile').value.trim();
-      const rank = Number(document.getElementById('mRank').value);
-      const msg = document.getElementById('mMsg');
-      if(!link || !text || !rank){ msg.textContent='Нужны ссылка, текст и место'; return; }
-      await addDoc(collection(db,'levels'), {
-        link, text, fileUrl, rank,
-        addedBy:user.uid, addedByNick:me.nick ?? 'elder', createdAt:serverTimestamp(),
-        status:'active', sourceSubmissionId:null
-      });
-      msg.textContent = 'Уровень добавлен в лист.';
-    };
-  } catch (e) {
-    console.error(e);
-    statusEl.textContent = 'Не удалось загрузить панель старшего модератора.';
-  }
+  await renderUsers();
+  statusEl.textContent = '';
 });
 </script>
 </body>
