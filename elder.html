@@ -189,6 +189,7 @@ onAuthStateChanged(auth, async user=>{
     const me = meSnap.exists() ? meSnap.data() : null;
     if(!me || me.situation!=='verified') return location.href='nick.html';
     if(me.role!=='elder') return location.href='main.html';
+    meUid = user.uid;
 
     await loadUsers();
     statusEl.textContent = '';
