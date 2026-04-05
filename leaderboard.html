@@ -8,158 +8,221 @@
   .panel{display:none}
   .panel.active{display:block}
   .item{border:1px solid #2d8cff55;background:rgba(0,20,50,.35);padding:10px;border-radius:10px;margin-bottom:10px}
-  .item input,.item textarea{width:100%;margin-top:6px}
 </style>
 </head>
 <body>
-
-<div class="hud" style="max-width:1000px;margin:40px auto;">
+<div class="hud" style="max-width:1080px;margin:30px auto;">
   <div class="page-header">
     <h1 style="margin:0;">Лидерборд и лист</h1>
     <button id="backMain" class="btn-ghost">На главную</button>
   </div>
-  <p id="status" style="margin:8px 0 14px;color:#00ffff;">Загрузка...</p>
+
+  <div class="stats-grid">
+    <div class="stat"><div class="small">Верифицированных игроков</div><b id="statPlayers">—</b></div>
+    <div class="stat"><div class="small">Уровней в листе</div><b id="statLevels">—</b></div>
+  </div>
+  <p id="status" style="color:#00ffff;margin:8px 0 10px;">Загрузка...</p>
+
   <div class="tabs">
     <button data-tab="players">Игроки</button>
     <button data-tab="levels">Лист уровней</button>
-    <button data-tab="menu">Меню уровней</button>
   </div>
-  <div id="players" class="panel active"><div id="playersList"></div></div>
-  <div id="levels" class="panel"><div id="levelsList"></div></div>
-  <div id="menu" class="panel">
-    <div class="card">
-      <h2 style="margin-top:0;">Меню уровней для игроков</h2>
-      <div class="menu-grid">
-        <button id="goSubmitLevel">Отправить уровень</button>
-        <button id="goSubmitCompletion">Отправить прохождение</button>
-        <button id="goSubmitAppeal">Отправить апелляцию</button>
-        <button id="goMySubmissions">Мои отправки</button>
-      </div>
+
+  <div id="players" class="panel active">
+    <div class="toolbar">
+      <input id="playerSearch" placeholder="Поиск игрока по нику">
+      <select id="roleFilter">
+        <option value="all">Все роли</option>
+        <option value="player">Игроки</option>
+        <option value="moderator">Модераторы</option>
+        <option value="elder">Старшие модеры</option>
+      </select>
     </div>
-    <div id="moderatorMenuCard" class="card" style="margin-top:12px;display:none;">
-      <h2 style="margin-top:0;">Меню уровней для модераторов</h2>
-      <p class="small">Управление отправками и ручная постановка уровней.</p>
-      <div class="top-actions">
-        <button id="goModeratorLevels" class="btn-hero">Открыть модерацию уровней</button>
-      </div>
+    <div id="playersList"></div>
+  </div>
+
+  <div id="levels" class="panel">
+    <div class="toolbar">
+      <input id="levelSearch" placeholder="Поиск уровня по описанию/ссылке">
+      <select id="levelSort">
+        <option value="rankAsc">Сначала топ</option>
+        <option value="rankDesc">Сначала низ</option>
+      </select>
     </div>
+    <div id="levelsList"></div>
   </div>
 </div>
 
 <script type="module">
 import { auth, db } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import { collection, query, orderBy, getDocs, doc, getDoc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+import { collection, query, orderBy, getDocs, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
-const statusEl = document.getElementById('status');
 const playersList = document.getElementById('playersList');
 const levelsList = document.getElementById('levelsList');
-let canModerateLevels = false;
+const playerSearch = document.getElementById('playerSearch');
+const roleFilter = document.getElementById('roleFilter');
+const levelSearch = document.getElementById('levelSearch');
+const levelSort = document.getElementById('levelSort');
+const statPlayers = document.getElementById('statPlayers');
+const statLevels = document.getElementById('statLevels');
+const statusEl = document.getElementById('status');
+
+let currentUid = null;
+let usersCache = [];
+let levelsCache = [];
+let scoringCfg = { maximumPoints:100, rankDecayFactor:3, repeatPenaltyPower:0.5 };
+
+function escapeHtml(value){
+  return String(value ?? '').replace(/[&<>'"]/g, ch => ({ '&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;' }[ch]));
+}
+
+function normalizeUrl(input){
+  const value = (input ?? '').trim();
+  if(!value) return '';
+  try {
+    const parsed = new URL(value);
+    if(parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '';
+    return parsed.toString();
+  } catch {
+    return '';
+  }
+}
 
 function setTab(id){
   document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
   document.getElementById(id).classList.add('active');
   document.querySelectorAll('.tabs button').forEach(btn=>btn.classList.toggle('active', btn.dataset.tab===id));
 }
-document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
-document.getElementById('backMain').onclick = ()=> location.href='main.html';
-document.getElementById('goSubmitLevel').onclick = ()=> location.href='submit-level.html';
-document.getElementById('goSubmitCompletion').onclick = ()=> location.href='submit-completion.html';
-document.getElementById('goSubmitAppeal').onclick = ()=> location.href='submit-appeal.html';
-document.getElementById('goMySubmissions').onclick = ()=> location.href='my-submissions.html';
-document.getElementById('goModeratorLevels').onclick = ()=> location.href='moderator-levels.html';
-if(location.hash === '#menu') setTab('menu');
-else if(location.hash === '#levels') setTab('levels');
-else setTab('players');
 
-function renderLevel(levelDoc){
-  const lv = levelDoc.data();
-  if(lv.status === 'archived') return null;
-  const item = document.createElement('div');
-  item.className='item';
-
-  if(!canModerateLevels){
-    item.innerHTML = `<b>#${lv.rank ?? '—'}</b> · <a target="_blank" href="${lv.link}">Открыть уровень</a><br>${lv.text ?? ''}<br><span class="small">Файл: ${lv.fileUrl || '—'}</span>`;
-    return item;
-  }
-
-  item.innerHTML = `
-    <b>#${lv.rank ?? '—'}</b> · <a target="_blank" href="${lv.link}">Открыть уровень</a>
-    <textarea class="editText" placeholder="Описание">${lv.text ?? ''}</textarea>
-    <input class="editLink" value="${lv.link ?? ''}" placeholder="Ссылка на уровень">
-    <input class="editFile" value="${lv.fileUrl ?? ''}" placeholder="Ссылка на файл (опционально)">
-    <input class="editRank" type="number" min="1" value="${lv.rank ?? 1}" placeholder="Место">
-    <div class="top-actions">
-      <button class="saveLevel">Сохранить</button>
-      <button class="deleteLevel btn-danger">Удалить уровень</button>
-    </div>
-  `;
-  item.querySelector('.saveLevel').onclick = async ()=>{
-    const rank = Number(item.querySelector('.editRank').value);
-    const link = item.querySelector('.editLink').value.trim();
-    const text = item.querySelector('.editText').value.trim();
-    const fileUrl = item.querySelector('.editFile').value.trim();
-    if(!rank || !link){ alert('Нужны место и ссылка'); return; }
-    await updateDoc(doc(db,'levels',levelDoc.id), { rank, link, text, fileUrl });
-    item.style.outline = '1px solid rgba(32,245,204,.7)';
-  };
-  item.querySelector('.deleteLevel').onclick = async ()=>{
-    if(!confirm('Удалить уровень из листа?')) return;
-    await deleteDoc(doc(db,'levels',levelDoc.id));
-    item.remove();
-  };
-  return item;
+function calculateCompletionPoints(listRank, listSize, approvedCompletionsCount, scoringSettings){
+  const normalizedListSize = Math.max(2, Number(listSize || 2));
+  const normalizedRank = Math.max(1, Math.min(Number(listRank || 1), normalizedListSize));
+  const x = (normalizedRank - 1) / (normalizedListSize - 1);
+  const base = scoringSettings.maximumPoints * Math.exp(-scoringSettings.rankDecayFactor * x);
+  const antiGrind = 1 / Math.pow(Math.max(1, approvedCompletionsCount), scoringSettings.repeatPenaltyPower);
+  return Math.round(base * antiGrind * 100) / 100;
 }
 
-onAuthStateChanged(auth, async u=>{
- if(!u) return location.href='index.html';
+async function getScoring(){
+  const snap = await getDoc(doc(db,'settings','scoring'));
+  const s = snap.exists() ? snap.data() : {};
+  return {
+    maximumPoints: Number(s.maximumPoints ?? s.maxPoints ?? 100),
+    rankDecayFactor: Number(s.rankDecayFactor ?? s.decayA ?? 3),
+    repeatPenaltyPower: Number(s.repeatPenaltyPower ?? s.grindPower ?? 0.5)
+  };
+}
 
- try {
-  const meSnap = await getDoc(doc(db,'users',u.uid));
-  const me = meSnap.exists() ? meSnap.data() : null;
-  if(!me || me.situation!=='verified') return location.href='nick.html';
-  canModerateLevels = (me.role==='moderator' || me.role==='elder');
-  if(canModerateLevels){
-    document.getElementById('moderatorMenuCard').style.display = '';
-  }
+function renderPlayers(){
+  const q = playerSearch.value.trim().toLowerCase();
+  const role = roleFilter.value;
+  playersList.innerHTML = '';
 
-  const usersSnap = await getDocs(query(collection(db,'users'),orderBy('points','desc')));
-  let r=0,p=0,last=null;
-  usersSnap.forEach(d=>{
-    const u2=d.data();
-    if(u2.situation!=='verified') return;
-    r++;
-    if(u2.points!==last){p=r;last=u2.points;}
-    const row=document.createElement('div');
+  const filtered = usersCache.filter(({data}) => {
+    const nick = String(data.nick ?? '').toLowerCase();
+    const userRole = data.role === 'moderator' || data.role === 'elder' ? data.role : 'player';
+    if(role !== 'all' && role !== userRole) return false;
+    if(q && !nick.includes(q)) return false;
+    return true;
+  });
+
+  let displayRank = 0;
+  let leaderboardIndex = 0;
+  let lastPoints = null;
+
+  filtered.forEach(({id, data})=>{
+    leaderboardIndex++;
+    if(data.points !== lastPoints){ displayRank = leaderboardIndex; lastPoints = data.points; }
+
+    const row = document.createElement('div');
     row.className='row';
-    if(d.id===u.uid) row.classList.add('me');
-    if(u2.role==='moderator') row.classList.add('moderator');
-    if(u2.role==='elder') row.classList.add('elder');
-    row.innerHTML=`<div>${p}</div><div>${u2.nick ?? 'Без ника'}</div><div>${u2.points ?? 0}</div>`;
+    if(id===currentUid) row.classList.add('me');
+    if(data.role==='moderator') row.classList.add('moderator');
+    if(data.role==='elder') row.classList.add('elder');
+    row.innerHTML = `<div>${displayRank}</div><div>${escapeHtml(data.nick ?? 'Без ника')}</div><div>${Number(data.points ?? 0)}</div>`;
     playersList.appendChild(row);
   });
 
-  const levelsSnap = await getDocs(query(collection(db,'levels'), orderBy('rank','asc')));
-  if(levelsSnap.empty){
-    levelsList.innerHTML = '<p>Лист уровней пока пуст.</p>';
-  } else {
-    levelsSnap.forEach(d=>{
-      const lv = d.data();
-    if(lv.status==='archived') return;
-      const item = renderLevel(d);
-      if(item) levelsList.appendChild(item);
-    });
-  }
+  if(!playersList.childElementCount) playersList.innerHTML = '<p>Ничего не найдено.</p>';
+}
 
-  if(!playersList.childElementCount){
-    statusEl.textContent='Пока нет верифицированных участников.';
-  } else {
-    statusEl.textContent='';
+function renderLevels(){
+  const q = levelSearch.value.trim().toLowerCase();
+  const sortMode = levelSort.value;
+  levelsList.innerHTML = '';
+
+  const list = levelsCache
+    .filter(({data}) => data.status !== 'archived')
+    .filter(({data}) => (`${data.text ?? ''} ${data.link ?? ''}`).toLowerCase().includes(q))
+    .sort((a,b)=>{
+      const ar = Number(a.data.rank ?? 999999);
+      const br = Number(b.data.rank ?? 999999);
+      return sortMode === 'rankDesc' ? br - ar : ar - br;
+    });
+
+  const quantity = Math.max(list.length, 2);
+  list.forEach(({data})=>{
+    const safeLink = normalizeUrl(data.link);
+    const safeFile = normalizeUrl(data.fileUrl);
+    const levelPoints = calculateCompletionPoints(Number(data.rank ?? 1), quantity, 1, scoringCfg);
+    const item = document.createElement('div');
+    item.className = 'item';
+    item.innerHTML = `
+      <b>#${Number(data.rank ?? 0) || '—'}</b> ·
+      ${safeLink ? `<a target="_blank" href="${escapeHtml(safeLink)}" rel="noopener noreferrer">Открыть уровень</a>` : '<span class="small">Некорректная ссылка</span>'}
+      <br>${escapeHtml(data.text ?? '')}
+      <br><span class="small">Файл: ${safeFile ? `<a target="_blank" href="${escapeHtml(safeFile)}" rel="noopener noreferrer">ссылка</a>` : '—'}</span>
+      <br><span class="small">Очки за прохождение: ${levelPoints}</span>
+    `;
+    levelsList.appendChild(item);
+  });
+
+  if(!levelsList.childElementCount) levelsList.innerHTML = '<p>Уровни не найдены.</p>';
+}
+
+async function refreshUsers(){
+  const usersSnap = await getDocs(query(collection(db,'users'),orderBy('points','desc')));
+  usersCache = [];
+  usersSnap.forEach(d=>{
+    const u = d.data();
+    if(u.situation!=='verified') return;
+    usersCache.push({ id:d.id, data:u });
+  });
+  statPlayers.textContent = String(usersCache.length);
+  renderPlayers();
+}
+
+async function refreshLevels(){
+  const levelsSnap = await getDocs(query(collection(db,'levels'), orderBy('rank','asc')));
+  scoringCfg = await getScoring();
+  levelsCache = [];
+  levelsSnap.forEach(d=>levelsCache.push({ id:d.id, data:d.data() }));
+  statLevels.textContent = String(levelsCache.filter(x=>x.data.status!=='archived').length);
+  renderLevels();
+}
+
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
+playerSearch.oninput = renderPlayers;
+roleFilter.onchange = renderPlayers;
+levelSearch.oninput = renderLevels;
+levelSort.onchange = renderLevels;
+document.getElementById('backMain').onclick = ()=> location.href='main.html';
+
+onAuthStateChanged(auth, async u=>{
+  if(!u) return location.href='index.html';
+  try{
+    const meSnap = await getDoc(doc(db,'users',u.uid));
+    const me = meSnap.exists() ? meSnap.data() : null;
+    if(!me || me.situation!=='verified') return location.href='nick.html';
+    currentUid = u.uid;
+    await refreshUsers();
+    await refreshLevels();
+    statusEl.textContent = '';
+  } catch (e){
+    console.error(e);
+    statusEl.textContent = 'Не удалось загрузить лидерборд.';
   }
- } catch (e) {
-  console.error(e);
-  statusEl.textContent='Не удалось загрузить данные. Попробуйте позже.';
- }
 });
 </script>
 </body>
