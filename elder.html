@@ -239,15 +239,24 @@ async function recalcAllPoints(){
   size = Math.max(2, size);
 
   const compSnap = await getDocs(query(collection(db,'completion_submissions'), where('status','==','approved')));
+  const awardsSnap = await getDocs(collection(db,'point_awards'));
   const byUser = new Map();
+  const bonusByUser = new Map();
   compSnap.forEach(d=>{
     const c = { id:d.id, ...d.data() };
     if(!c.playerId) return;
     if(!byUser.has(c.playerId)) byUser.set(c.playerId, []);
     byUser.get(c.playerId).push(c);
   });
+  awardsSnap.forEach(d=>{
+    const a = d.data();
+    if(!a.playerId) return;
+    bonusByUser.set(a.playerId, Number(bonusByUser.get(a.playerId) ?? 0) + Number(a.amount ?? 0));
+  });
 
-  for(const [uid, arr] of byUser){
+  const allUsers = new Set([...byUser.keys(), ...bonusByUser.keys()]);
+  for(const uid of allUsers){
+    const arr = byUser.get(uid) ?? [];
     arr.sort((a,b)=>(a.reviewedAt?.seconds ?? 0) - (b.reviewedAt?.seconds ?? 0));
     let sum = 0;
     for(let i=0;i<arr.length;i++){
@@ -261,7 +270,8 @@ async function recalcAllPoints(){
         scoreK: i+1
       });
     }
-    await updateDoc(doc(db,'users',uid), { points: Math.round(sum * 100) / 100 });
+    const total = Math.round((sum + Number(bonusByUser.get(uid) ?? 0))*100)/100;
+    await updateDoc(doc(db,'users',uid), { points: total });
   }
 }
 
@@ -316,10 +326,12 @@ function renderMainList(){
     const row = document.createElement('div');
     row.className = 'row list-item clickable';
     if(showPlayers){
+      if(item.role==='moderator') row.classList.add('moderator');
+      if(item.role==='elder') row.classList.add('elder');
       row.innerHTML = `<div>${item.rank}</div><div>${item.nick ?? 'Без ника'}</div><div>${Number(item.points ?? 0)}</div>`;
       row.onclick = ()=> openPlayerModal(item.id);
     } else {
-      row.innerHTML = `<div>${Number(item.rank ?? 0) || '—'}</div><div>${item.text ?? 'Без названия'}</div><div>${item.builder ?? '—'} / ${item.verifier ?? '—'}</div>`;
+      row.innerHTML = `<div>${Number(item.rank ?? 0) || '—'}</div><div>${item.text ?? 'Без названия'}</div><div>${calcPoints(Number(item.rank ?? 1), Math.max(2, levels.filter(x=>x.status!=='archived').length), 1)} · ${item.builder ?? '—'} / ${item.verifier ?? '—'}</div>`;
       row.onclick = ()=> openLevelModal(item.id);
     }
     listContainer.appendChild(row);
@@ -363,8 +375,12 @@ async function openPlayerModal(playerId){
       <div class="top-actions">
         <button id="savePlayer">Сохранить профиль</button>
         <button id="toggleVerify" class="${verNegative ? 'danger' : ''}">${verNegative ? 'Снять верификацию' : 'Верифицировать'}</button>
+        <button id="toggleFreeze" class="${player.accountFrozen ? '' : 'danger'}">${player.accountFrozen ? 'Разморозить аккаунт' : 'Заморозить аккаунт'}</button>
         <button id="deletePlayer" class="danger">Удалить аккаунт</button>
       </div>
+      <label>Сообщение игроку</label>
+      <textarea id="modMessageText" placeholder="Текст сообщения"></textarea>
+      <div class="top-actions"><button id="sendModMessage">Отправить сообщение</button></div>
     </div>
 
     <div class="card">
@@ -373,16 +389,11 @@ async function openPlayerModal(playerId){
         <thead><tr><th>Дата</th><th>Уровень</th><th>Очки</th><th>Действие</th></tr></thead>
         <tbody>
           ${approved.map(c=>{
-            const options = levels
-              .filter(l=>l.status!=='archived')
-              .sort((a,b)=>Number(a.rank??9999)-Number(b.rank??9999))
-              .map(l=>`<option value="${l.id}" ${c.levelId===l.id?'selected':''}>#${Number(l.rank ?? 0) || '—'} · ${String(l.text ?? 'Без названия')}</option>`)
-              .join('');
             return `<tr>
               <td>${fmtDate(c.reviewedAt)}</td>
-              <td><select data-comp-id="${c.id}" class="compLevel">${options}</select></td>
+              <td>${c.levelText ?? levels.find(l=>l.id===c.levelId)?.text ?? 'Уровень'}</td>
               <td>${Number(c.awardedPoints ?? 0)}</td>
-              <td><button data-comp-save="${c.id}">Изменить уровень</button></td>
+              <td><button data-comp-delete="${c.id}" class="danger">Удалить прохождение</button></td>
             </tr>`;
           }).join('') || '<tr><td colspan="4">Нет подтвержденных прохождений.</td></tr>'}
         </tbody>
@@ -403,9 +414,21 @@ async function openPlayerModal(playerId){
     await updateDoc(doc(db,'users',playerId), {
       nick: nextNick,
       email: nextEmail,
-      points: nextPoints,
       role: nextRole
     });
+    const delta = Math.round((nextPoints - Number(player.points ?? 0))*100)/100;
+    if(delta !== 0){
+      await addDoc(collection(db,'point_awards'), {
+        playerId,
+        playerNick: nextNick,
+        amount: delta,
+        reason: 'Ручная корректировка очков старшим модератором',
+        grantedBy: me.uid,
+        grantedByNick: me.nick ?? 'elder',
+        createdAt: serverTimestamp()
+      });
+    }
+    await recalcAllPoints();
     await logModeratorAction('update_player_profile', { playerId, nick: nextNick, points: nextPoints, role: nextRole, email: nextEmail });
     await loadData();
     renderMainList();
@@ -420,6 +443,22 @@ async function openPlayerModal(playerId){
     renderMainList();
     await openPlayerModal(playerId);
   };
+  document.getElementById('toggleFreeze').onclick = async ()=>{
+    const next = !Boolean(player.accountFrozen);
+    const reason = next ? (prompt('Причина заморозки (необязательно):','') || '').trim() : '';
+    await updateDoc(doc(db,'users',playerId), { accountFrozen: next, frozenReason: reason, frozenAt: next ? serverTimestamp() : null, frozenBy: next ? me.uid : null });
+    await logModeratorAction('toggle_player_freeze', { playerId, accountFrozen: next, reason });
+    await loadData();
+    renderMainList();
+    await openPlayerModal(playerId);
+  };
+  document.getElementById('sendModMessage').onclick = async ()=>{
+    const text = document.getElementById('modMessageText').value.trim();
+    if(!text) return alert('Введите текст сообщения');
+    await addDoc(collection(db,'moderator_messages'), { toUid: playerId, toNick: player.nick ?? 'Без ника', fromUid: me.uid, fromNick: me.nick ?? 'elder', fromRole: 'elder', text, createdAt: serverTimestamp(), readAt: null });
+    await logModeratorAction('send_message_to_player', { toUid: playerId, toNick: player.nick ?? 'Без ника' });
+    document.getElementById('modMessageText').value = '';
+  };
 
   document.getElementById('deletePlayer').onclick = async ()=>{
     if(!confirm('Удалить профиль пользователя? Это действие необратимо.')) return;
@@ -430,19 +469,12 @@ async function openPlayerModal(playerId){
     renderMainList();
   };
 
-  document.querySelectorAll('[data-comp-save]').forEach(btn=>{
+  document.querySelectorAll('[data-comp-delete]').forEach(btn=>{
     btn.onclick = async ()=>{
-      const compId = btn.dataset.compSave;
-      const select = document.querySelector(`select[data-comp-id="${compId}"]`);
-      const levelId = select?.value;
-      const level = levels.find(l=>l.id===levelId);
-      if(!level) return;
-      await updateDoc(doc(db,'completion_submissions',compId), {
-        levelId,
-        listRank: Number(level.rank ?? 1),
-        levelText: level.text ?? 'Уровень'
-      });
-      await logModeratorAction('change_completion_level', { completionSubmissionId: compId, levelId, levelRank: Number(level.rank ?? 1) });
+      const compId = btn.dataset.compDelete;
+      if(!confirm('Удалить подтверждённое прохождение игрока?')) return;
+      await updateDoc(doc(db,'completion_submissions',compId), { status:'removed', note:'Удалено старшим модератором', removedBy: me.uid, removedAt: serverTimestamp() });
+      await logModeratorAction('delete_completion_from_player', { completionSubmissionId: compId, playerId });
       await recalcAllPoints();
       await loadData();
       renderMainList();
@@ -666,6 +698,7 @@ onAuthStateChanged(auth, async user=>{
     const meSnap = await getDoc(doc(db,'users',user.uid));
     const profile = meSnap.exists() ? meSnap.data() : null;
     if(!profile || profile.situation!=='verified') return location.href='nick.html';
+    if(profile.accountFrozen) return location.href='index.html';
     if(profile.role!=='elder') return location.href='main.html';
 
     me = { uid:user.uid, nick:profile.nick ?? 'elder' };
