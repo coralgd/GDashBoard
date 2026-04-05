@@ -4,86 +4,127 @@
 <meta charset="UTF-8">
 <title>Панель модератора</title>
 <link rel="stylesheet" href="hud.css">
-<style>.panel{display:none;margin-top:14px}.panel.active{display:block}</style>
+<style>
+  .panel{display:none;margin-top:14px}
+  .panel.active{display:block}
+</style>
 </head>
 <body>
-<div class="hud" style="max-width:1100px;margin:40px auto;">
-  <h1>Панель модератора</h1>
+<div class="hud" style="max-width:1150px;margin:40px auto;">
+  <div class="page-header">
+    <h1>Панель модератора</h1>
+    <button id="goListMenu" class="btn-hero">Меню листа</button>
+  </div>
   <p id="status" style="color:#00ffff;">Загрузка...</p>
 
-  <div class="menu-grid">
-    <button data-tab="levels">Заявки уровней</button>
-    <button data-tab="completions">Заявки прохождений</button>
-    <button data-tab="users">Аккаунты</button>
-  </div>
+  <div id="playersPanel" class="panel active"></div>
+  <div id="listMenuPanel" class="panel"></div>
+</div>
 
-  <div id="levels" class="panel active"></div>
-  <div id="completions" class="panel"></div>
-  <div id="users" class="panel"></div>
+<div id="modal" class="dialog-backdrop">
+  <div class="dialog">
+    <div class="page-header">
+      <h2 id="mTitle" style="margin:0">Уровень</h2>
+      <button id="mClose" class="btn-ghost">Закрыть</button>
+    </div>
+    <div id="mBody"></div>
+  </div>
 </div>
 
 <script type="module">
 import { auth, db, getNetworkErrorMessage } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import { collection, query, where, getDocs, doc, updateDoc, getDoc, addDoc, serverTimestamp, deleteDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+import { collection, getDocs, query, where, doc, getDoc, updateDoc, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
 const statusEl = document.getElementById('status');
+const playersPanel = document.getElementById('playersPanel');
+const listMenuPanel = document.getElementById('listMenuPanel');
+const modal = document.getElementById('modal');
 let me = null;
 
-function setTab(id){
-  document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
-  document.getElementById(id).classList.add('active');
+function setPanel(name){
+  playersPanel.classList.toggle('active', name==='players');
+  listMenuPanel.classList.toggle('active', name==='list');
 }
-document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
 
-async function clearUserHistory(uid){
-  const [levelSub, completionSub, appealSub] = await Promise.all([
-    getDocs(query(collection(db,'level_submissions'), where('authorId','==',uid))),
-    getDocs(query(collection(db,'completion_submissions'), where('playerId','==',uid))),
-    getDocs(query(collection(db,'appeals'), where('playerId','==',uid)))
+document.getElementById('goListMenu').onclick = ()=> setPanel('list');
+document.getElementById('mClose').onclick = ()=> modal.classList.remove('open');
+
+function openLevelModal(level){
+  const rank = Number(level.rank ?? 0) || '—';
+  document.getElementById('mTitle').textContent = `Уровень #${rank}`;
+  document.getElementById('mBody').innerHTML = `
+    <p><b>Название:</b> ${level.text ?? 'Без названия'}</p>
+    <p><b>Ссылка:</b> <a target="_blank" href="${level.link ?? '#'}">Открыть</a></p>
+    <p><b>Файл:</b> ${level.fileUrl ?? '—'}</p>
+    <p><b>Статус:</b> ${level.status ?? 'active'}</p>
+    <p class="small">Кнопка ниже НЕ меняет уровень напрямую. Она отправляет заявку старшему модератору на проверку.</p>
+    <div class="top-actions">
+      <button id="sendForReview">Проверить (заявка старшему)</button>
+    </div>
+    <p id="modalMsg" class="small"></p>
+  `;
+  document.getElementById('sendForReview').onclick = async ()=>{
+    const msg = document.getElementById('modalMsg');
+    try {
+      await addDoc(collection(db,'level_review_requests'), {
+        levelId: level.id,
+        levelText: level.text ?? '',
+        levelLink: level.link ?? '',
+        levelRank: Number(level.rank ?? 0) || null,
+        requestedBy: me.uid,
+        requestedByNick: me.nick ?? 'moderator',
+        status: 'pending',
+        createdAt: serverTimestamp()
+      });
+      msg.textContent = 'Заявка отправлена старшему модератору.';
+    } catch (e) {
+      msg.textContent = getNetworkErrorMessage(e);
+    }
+  };
+  modal.classList.add('open');
+}
+
+async function loadPlayers(){
+  const [usersSnap] = await Promise.all([
+    getDocs(query(collection(db,'users'), where('situation','==','verified')))
   ]);
-  await Promise.all(levelSub.docs.map(d=>deleteDoc(doc(db,'level_submissions',d.id))));
-  await Promise.all(completionSub.docs.map(d=>deleteDoc(doc(db,'completion_submissions',d.id))));
-  await Promise.all(appealSub.docs.map(d=>deleteDoc(doc(db,'appeals',d.id))));
-}
 
-async function loadUsersTab(){
-  const box = document.getElementById('users');
-  const snap = await getDocs(collection(db,'users'));
-  const rows = [];
-  snap.forEach(d=>rows.push({id:d.id, ...d.data()}));
-  rows.sort((a,b)=>String(a.nick ?? '').localeCompare(String(b.nick ?? ''), 'ru'));
+  const users = [];
+  usersSnap.forEach(d=>users.push({id:d.id,...d.data()}));
+  users.sort((a,b)=>String(a.nick ?? '').localeCompare(String(b.nick ?? ''),'ru'));
 
-  box.innerHTML = `
-    <label>Поиск игрока / роли / почты</label>
-    <input id="userSearch" placeholder="Например: player, ivan, @mail">
-    <div id="userList"></div>
+  playersPanel.innerHTML = `
+    <div class="page-header"><h2 style="margin:0">Верифицированные игроки</h2><button id="openPlayers" class="btn-ghost">Список игроков</button></div>
+    <label>Поиск по нику/роли</label>
+    <input id="playerSearch" placeholder="Например: player, ivan">
+    <div id="playerList"></div>
   `;
 
-  const list = document.getElementById('userList');
+  document.getElementById('openPlayers').onclick = ()=> setPanel('players');
+
+  const list = document.getElementById('playerList');
   const render = ()=>{
-    const q = document.getElementById('userSearch').value.trim().toLowerCase();
+    const q = document.getElementById('playerSearch').value.trim().toLowerCase();
     list.innerHTML = '';
-    const filtered = rows.filter(u=>`${u.nick ?? ''} ${u.role ?? ''} ${u.email ?? ''}`.toLowerCase().includes(q));
-    if(!filtered.length){ list.innerHTML='<p>Пусто.</p>'; return; }
+    const filtered = users.filter(u=>`${u.nick ?? ''} ${u.role ?? ''}`.toLowerCase().includes(q));
+    if(!filtered.length){ list.innerHTML = '<p>Игроков не найдено.</p>'; return; }
 
     filtered.forEach(u=>{
       const row = document.createElement('div');
-      row.className='card';
-      const locked = u.id===me.uid || u.role==='moderator' || u.role==='elder';
+      row.className = 'card';
       row.innerHTML = `
         <b>${u.nick ?? 'Без ника'}</b>
-        <p class="small">Почта: ${u.email ?? '—'}</p>
-        <p class="small">Роль: ${u.role ?? 'player'} · Очки: ${Number(u.points ?? 0)}</p>
-        <p class="small">Кнопка удаляет профиль и все отправки игрока.</p>
-        <button class="btn-danger del" ${locked ? 'disabled' : ''}>Удалить аккаунт</button>
+        <p class="small">Роль: ${u.role ?? 'player'} · Почта: ${u.email ?? '—'}</p>
+        <label>Очки (что меняет: поле points у игрока)</label>
+        <input class="points" type="number" value="${Number(u.points ?? 0)}">
+        <div class="top-actions"><button class="savePoints">Сохранить очки</button></div>
       `;
-      row.querySelector('.del').onclick = async ()=>{
-        if(!confirm(`Удалить аккаунт ${u.nick ?? 'Без ника'}?`)) return;
+      row.querySelector('.savePoints').onclick = async ()=>{
+        const points = Number(row.querySelector('.points').value);
+        if(Number.isNaN(points)) return alert('Некорректное число');
         try {
-          await clearUserHistory(u.id);
-          await deleteDoc(doc(db,'users',u.id));
-          row.remove();
+          await updateDoc(doc(db,'users',u.id), { points });
         } catch (e) {
           alert(getNetworkErrorMessage(e));
         }
@@ -92,139 +133,42 @@ async function loadUsersTab(){
     });
   };
 
-  document.getElementById('userSearch').oninput = render;
+  document.getElementById('playerSearch').oninput = render;
   render();
 }
 
-async function loadPendingLevels(){
-  const snap = await getDocs(query(collection(db,'level_submissions'), where('status','==','pending')));
-  const rows = [];
-  snap.forEach(d=>rows.push({id:d.id,...d.data()}));
+async function loadListMenu(){
+  const levelsSnap = await getDocs(query(collection(db,'levels')));
+  const levels = [];
+  levelsSnap.forEach(d=>{const l=d.data(); if(l.status!=='archived') levels.push({id:d.id,...l});});
+  levels.sort((a,b)=>Number(a.rank ?? 9999) - Number(b.rank ?? 9999));
 
-  const box = document.getElementById('levels');
-  box.innerHTML = `
-    <label>Поиск по нику / тексту / ссылке</label>
-    <input id="levelSearch" placeholder="Например: demon, memory, youtube">
+  listMenuPanel.innerHTML = `
+    <div class="page-header"><h2 style="margin:0">Меню листа</h2><button id="backPlayers" class="btn-ghost">К игрокам</button></div>
+    <label>Поиск по уровню</label>
+    <input id="levelSearch" placeholder="Название, ранг, ссылка">
     <div id="levelList"></div>
   `;
+  document.getElementById('backPlayers').onclick = ()=> setPanel('players');
 
   const list = document.getElementById('levelList');
   const render = ()=>{
     const q = document.getElementById('levelSearch').value.trim().toLowerCase();
     list.innerHTML = '';
-    const filtered = rows.filter(s=>`${s.nick ?? ''} ${s.text ?? ''} ${s.link ?? ''} ${s.referenceSubmissionId ?? ''}`.toLowerCase().includes(q));
-    if(!filtered.length){ list.innerHTML='<p>Нет заявок.</p>'; return; }
+    const filtered = levels.filter(l=>`${l.text ?? ''} ${l.rank ?? ''} ${l.link ?? ''}`.toLowerCase().includes(q));
+    if(!filtered.length){ list.innerHTML='<p>Уровней не найдено.</p>'; return; }
 
-    filtered.forEach(s=>{
-      const row=document.createElement('div');
-      row.className='card';
-      row.innerHTML=`
-        <b>${s.nick ?? 'Без ника'}</b>
-        <p><a href="${s.link ?? '#'}" target="_blank">Открыть ссылку</a></p>
-        <p>${s.text ?? ''}</p>
-        <p class="small">ref: ${s.referenceSubmissionId ?? '—'} · Что меняет место: поле «Место» ниже.</p>
-        <label>Комментарий модератора (что меняет: note)</label>
-        <input class="note" placeholder="Причина решения">
-        <label>Место в листе (что меняет: rank/finalRank)</label>
-        <input class="rank" type="number" min="1" placeholder="Например: 12">
-        <div class="top-actions"><button class="ok">Одобрить</button><button class="no btn-danger">Отклонить</button></div>
-      `;
-      row.querySelector('.ok').onclick = async ()=>{
-        const rank=Number(row.querySelector('.rank').value);
-        if(!rank) return alert('Укажи место');
-        await addDoc(collection(db,'levels'),{link:s.link ?? '',text:s.text ?? '',fileUrl:s.fileUrl ?? '',rank,status:'active',addedBy:me.uid,addedByNick:me.nick ?? 'moderator',createdAt:serverTimestamp(),sourceSubmissionId:s.id});
-        await updateDoc(doc(db,'level_submissions',s.id),{status:'approved',note:row.querySelector('.note').value.trim(),reviewedBy:me.uid,reviewedAt:serverTimestamp(),finalRank:rank});
-        row.remove();
-      };
-      row.querySelector('.no').onclick = async ()=>{
-        await updateDoc(doc(db,'level_submissions',s.id),{status:'rejected',note:row.querySelector('.note').value.trim() || 'Отклонено',reviewedBy:me.uid,reviewedAt:serverTimestamp()});
-        row.remove();
-      };
+    filtered.forEach(l=>{
+      const row = document.createElement('div');
+      row.className = 'row list-item clickable';
+      row.innerHTML = `<div>${Number(l.rank ?? 0) || '—'}</div><div>${l.text ?? 'Без названия'}</div><div>${l.status ?? 'active'}</div>`;
+      row.onclick = ()=> openLevelModal(l);
       list.appendChild(row);
     });
   };
 
   document.getElementById('levelSearch').oninput = render;
   render();
-}
-
-async function loadPendingCompletions(){
-  const snap = await getDocs(query(collection(db,'completion_submissions'), where('status','==','pending')));
-  const rows = [];
-  snap.forEach(d=>rows.push({id:d.id,...d.data()}));
-
-  const box = document.getElementById('completions');
-  box.innerHTML = `
-    <label>Поиск по нику / тексту / ссылке</label>
-    <input id="compSearch" placeholder="Например: player, level name, link">
-    <div id="compList"></div>
-  `;
-
-  const list = document.getElementById('compList');
-  const render = ()=>{
-    const q = document.getElementById('compSearch').value.trim().toLowerCase();
-    list.innerHTML = '';
-    const filtered = rows.filter(s=>`${s.nick ?? ''} ${s.text ?? ''} ${s.link ?? ''} ${s.referenceSubmissionId ?? ''}`.toLowerCase().includes(q));
-    if(!filtered.length){ list.innerHTML='<p>Нет заявок.</p>'; return; }
-
-    filtered.forEach(s=>{
-      const row=document.createElement('div');
-      row.className='card';
-      row.innerHTML=`
-        <b>${s.nick ?? 'Без ника'}</b>
-        <p><a href="${s.link ?? '#'}" target="_blank">Открыть доказательство</a></p>
-        <p>${s.text ?? ''}</p>
-        <p class="small">ref: ${s.referenceSubmissionId ?? '—'} · Что меняет комментарий: поле «Комментарий» ниже.</p>
-        <label>Комментарий модератора (что меняет: note)</label>
-        <input class="note" placeholder="Комментарий к решению">
-        <div class="top-actions"><button class="ok">Одобрить</button><button class="no btn-danger">Отклонить</button></div>
-      `;
-      row.querySelector('.ok').onclick = async ()=>{
-        await updateDoc(doc(db,'completion_submissions',s.id),{status:'approved',note:row.querySelector('.note').value.trim(),reviewedBy:me.uid,reviewedAt:serverTimestamp()});
-        row.remove();
-      };
-      row.querySelector('.no').onclick = async ()=>{
-        await updateDoc(doc(db,'completion_submissions',s.id),{status:'rejected',note:row.querySelector('.note').value.trim() || 'Отклонено',reviewedBy:me.uid,reviewedAt:serverTimestamp()});
-        row.remove();
-      };
-      list.appendChild(row);
-    });
-  };
-
-  document.getElementById('compSearch').oninput = render;
-  render();
-}
-
-function renderArchiveSection(title, items){
-  let html = `<h3>${title}</h3>`;
-  if(!items.length) return html + '<p class="small">Пусто.</p>';
-  items
-    .sort((a,b)=>(b.reviewedAt?.seconds ?? 0)-(a.reviewedAt?.seconds ?? 0))
-    .forEach(x=>{
-      html += `<div class="row"><b>${x.nick ?? 'Без ника'}</b><p>${x.text ?? ''}</p><p class="small">status=${x.status ?? '—'} · note=${x.note ?? '—'} · ref=${x.referenceSubmissionId ?? '—'}</p></div>`;
-    });
-  return html;
-}
-
-async function loadArchive(){
-  const box = document.getElementById('archive');
-  box.innerHTML = 'Загрузка архива...';
-
-  const [ls, cs, ap] = await Promise.all([
-    getDocs(collection(db,'level_submissions')),
-    getDocs(collection(db,'completion_submissions')),
-    getDocs(collection(db,'appeals'))
-  ]);
-
-  const levels = []; const completions = []; const appeals = [];
-  ls.forEach(d=>{ const x=d.data(); if(x.status && x.status!=='pending') levels.push(x); });
-  cs.forEach(d=>{ const x=d.data(); if(x.status && x.status!=='pending') completions.push(x); });
-  ap.forEach(d=>{ const x=d.data(); if(x.status && x.status!=='pending') appeals.push(x); });
-
-  box.innerHTML =
-    renderArchiveSection('Архив уровней', levels) +
-    renderArchiveSection('Архив прохождений', completions) +
-    renderArchiveSection('Архив апелляций', appeals);
 }
 
 onAuthStateChanged(auth, async user => {
@@ -236,7 +180,8 @@ onAuthStateChanged(auth, async user => {
     if(data.role!=='moderator' && data.role!=='elder') return location.href='main.html';
 
     me = { uid:user.uid, nick:data.nick ?? 'moderator' };
-    await Promise.all([loadPendingLevels(), loadPendingCompletions(), loadUsersTab()]);
+    await Promise.all([loadPlayers(), loadListMenu()]);
+    setPanel('players');
     statusEl.textContent='';
   } catch (e) {
     statusEl.textContent = getNetworkErrorMessage(e);
