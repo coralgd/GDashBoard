@@ -20,8 +20,7 @@
   <div class="top-actions" style="justify-content:center;">
     <button id="leaderboardBtn" class="btn-hero">Лидерборд</button>
     <button id="openLevelsMenu" class="btn-hero">Меню уровней</button>
-    <button id="openArchive" class="btn-hero">Архив</button>
-    <button id="check" class="btn-hero">Модерация</button>
+    <button id="check" class="btn-hero">Проверить</button>
   </div>
 
   <p id="err" style="color:#ff98b3;margin-top:12px;"></p>
@@ -37,7 +36,6 @@ const info = document.getElementById('userInfo');
 const pointsEl = document.getElementById('userPoints');
 const placeEl = document.getElementById('userPlace');
 const err = document.getElementById('err');
-const archiveBtn = document.getElementById('openArchive');
 
 onAuthStateChanged(auth, async user => {
   if(!user) return location.href='index.html';
@@ -62,12 +60,6 @@ onAuthStateChanged(auth, async user => {
 
     document.getElementById('leaderboardBtn').onclick = ()=> location.href='leaderboard.html';
     document.getElementById('openLevelsMenu').onclick = ()=> location.href='levels-menu.html';
-    if(profile.role==='elder' || profile.role==='moderator'){
-      archiveBtn.style.display = '';
-      archiveBtn.onclick = ()=> location.href='archive.html';
-    } else {
-      archiveBtn.style.display = 'none';
-    }
     document.getElementById('check').onclick = ()=>{
       if(profile.role==='elder') location.href='elder.html';
       else if(profile.role==='moderator') location.href='moderator.html';

@@ -48,6 +48,8 @@
       <div class="card">
         <button id="toggleList" class="toolbar-btn btn-hero">Показать уровни</button>
         <button id="openSubmissions" class="toolbar-btn btn-success">Отправки</button>
+        <button id="openAddLevel" class="toolbar-btn">Добавить</button>
+        <button id="openArchive" class="toolbar-btn btn-ghost">Архив</button>
         <p class="small">Нажми на игрока или уровень, чтобы открыть подробное окно управления.</p>
       </div>
     </aside>
@@ -110,6 +112,33 @@
   </div>
 </div>
 
+<div id="addLevelModal" class="dialog-backdrop">
+  <div class="dialog" style="width:min(760px,96vw);">
+    <div class="page-header">
+      <h2 style="margin:0">Добавить уровень</h2>
+      <button id="closeAddLevel" class="btn-ghost">Закрыть</button>
+    </div>
+    <div class="card">
+      <label>Название уровня</label>
+      <textarea id="addLevelText" placeholder="Название"></textarea>
+      <label>Ссылка</label>
+      <input id="addLevelLink" placeholder="https://...">
+      <label>Файл (необязательно)</label>
+      <input id="addLevelFile" placeholder="URL файла">
+      <label>Строитель</label>
+      <input id="addLevelBuilder" placeholder="Ник строителя">
+      <label>Верифер</label>
+      <input id="addLevelVerifier" placeholder="Ник верифера">
+      <label>Место в листе</label>
+      <input id="addLevelRank" type="number" min="1" placeholder="Например 15">
+      <div class="top-actions">
+        <button id="submitAddLevel" class="btn-success">Добавить</button>
+      </div>
+      <p id="addLevelMsg" class="small"></p>
+    </div>
+  </div>
+</div>
+
 <script type="module">
 import { auth, db, getNetworkErrorMessage } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
@@ -122,6 +151,7 @@ const toggleListBtn = document.getElementById('toggleList');
 const playerModal = document.getElementById('playerModal');
 const levelModal = document.getElementById('levelModal');
 const submissionsModal = document.getElementById('submissionsModal');
+const addLevelModal = document.getElementById('addLevelModal');
 const submissionListEl = document.getElementById('submissionList');
 const submissionDetail = document.getElementById('submissionDetail');
 const typeFilter = document.getElementById('typeFilter');
@@ -151,6 +181,20 @@ function submissionTypeLabel(type){
   if(type==='completion') return 'Прохождение';
   if(type==='level') return 'Постановка уровня';
   return 'Апелляция';
+}
+
+async function logModeratorAction(action, details = {}){
+  if(!me?.uid) return;
+  try {
+    await addDoc(collection(db,'moderator_actions'), {
+      action,
+      details,
+      actorUid: me.uid,
+      actorNick: me.nick ?? 'elder',
+      actorRole: 'elder',
+      createdAt: serverTimestamp()
+    });
+  } catch (_) {}
 }
 
 async function loadScoring(){
@@ -352,12 +396,17 @@ async function openPlayerModal(playerId){
   `;
 
   document.getElementById('savePlayer').onclick = async ()=>{
+    const nextNick = document.getElementById('pNick').value.trim() || 'Без ника';
+    const nextEmail = document.getElementById('pEmail').value.trim();
+    const nextPoints = Number(document.getElementById('pPoints').value || 0);
+    const nextRole = document.getElementById('pRole').value || 'player';
     await updateDoc(doc(db,'users',playerId), {
-      nick: document.getElementById('pNick').value.trim() || 'Без ника',
-      email: document.getElementById('pEmail').value.trim(),
-      points: Number(document.getElementById('pPoints').value || 0),
-      role: document.getElementById('pRole').value || 'player'
+      nick: nextNick,
+      email: nextEmail,
+      points: nextPoints,
+      role: nextRole
     });
+    await logModeratorAction('update_player_profile', { playerId, nick: nextNick, points: nextPoints, role: nextRole, email: nextEmail });
     await loadData();
     renderMainList();
     await openPlayerModal(playerId);
@@ -366,6 +415,7 @@ async function openPlayerModal(playerId){
   document.getElementById('toggleVerify').onclick = async ()=>{
     const newSituation = player.situation === 'verified' ? 'not requested' : 'verified';
     await updateDoc(doc(db,'users',playerId), { situation:newSituation });
+    await logModeratorAction('toggle_player_verify', { playerId, situation: newSituation });
     await loadData();
     renderMainList();
     await openPlayerModal(playerId);
@@ -374,6 +424,7 @@ async function openPlayerModal(playerId){
   document.getElementById('deletePlayer').onclick = async ()=>{
     if(!confirm('Удалить профиль пользователя? Это действие необратимо.')) return;
     await deleteDoc(doc(db,'users',playerId));
+    await logModeratorAction('delete_player', { playerId, nick: player.nick ?? 'Без ника' });
     playerModal.classList.remove('open');
     await loadData();
     renderMainList();
@@ -391,6 +442,7 @@ async function openPlayerModal(playerId){
         listRank: Number(level.rank ?? 1),
         levelText: level.text ?? 'Уровень'
       });
+      await logModeratorAction('change_completion_level', { completionSubmissionId: compId, levelId, levelRank: Number(level.rank ?? 1) });
       await recalcAllPoints();
       await loadData();
       renderMainList();
@@ -422,15 +474,18 @@ async function openLevelModal(levelId){
 
   document.getElementById('saveLevel').onclick = async ()=>{
     const targetRank = Number(document.getElementById('lRank').value || 1);
+    const nextText = document.getElementById('lText').value.trim();
+    const nextLink = document.getElementById('lLink').value.trim();
     await updateDoc(doc(db,'levels',levelId), {
-      text: document.getElementById('lText').value.trim(),
-      link: document.getElementById('lLink').value.trim(),
+      text: nextText,
+      link: nextLink,
       builder: document.getElementById('lBuilder').value.trim(),
       verifier: document.getElementById('lVerifier').value.trim(),
       rank: targetRank,
       updatedBy: me.uid,
       updatedAt: serverTimestamp()
     });
+    await logModeratorAction('update_level', { levelId, rank: targetRank, text: nextText, link: nextLink });
     await loadData();
     await placeLevel(levelId, targetRank);
     await recalcAllPoints();
@@ -442,6 +497,7 @@ async function openLevelModal(levelId){
   document.getElementById('deleteLevel').onclick = async ()=>{
     if(!confirm('Удалить уровень из листа?')) return;
     await deleteDoc(doc(db,'levels',levelId));
+    await logModeratorAction('delete_level', { levelId, rank: Number(level.rank ?? 0) || null, text: level.text ?? '' });
     await recalcAllPoints();
     await loadData();
     renderMainList();
@@ -537,6 +593,7 @@ async function applySubmissionVerdict(item, verdict){
     }
 
     await updateDoc(doc(db,'level_submissions',item.id), payload);
+    await logModeratorAction('review_level_submission', { submissionId: item.id, verdict, finalRank: payload.finalRank ?? null });
   }
 
   if(item.type==='completion'){
@@ -552,6 +609,7 @@ async function applySubmissionVerdict(item, verdict){
     }
 
     await updateDoc(doc(db,'completion_submissions',item.id), payload);
+    await logModeratorAction('review_completion_submission', { submissionId: item.id, verdict, levelId: payload.levelId ?? null });
   }
 
   if(item.type==='appeal'){
@@ -561,6 +619,7 @@ async function applySubmissionVerdict(item, verdict){
       reviewedBy: me.uid,
       reviewedAt: serverTimestamp()
     });
+    await logModeratorAction('review_appeal', { appealId: item.id, verdict });
   }
 
   await recalcAllPoints();
@@ -621,6 +680,7 @@ onAuthStateChanged(auth, async user=>{
 
 document.getElementById('backMain').onclick = ()=> location.href='main.html';
 document.getElementById('toggleList').onclick = ()=>{ showPlayers = !showPlayers; renderMainList(); };
+document.getElementById('openArchive').onclick = ()=> location.href='archive.html';
 
 document.getElementById('openSubmissions').onclick = ()=>{ selectedSubmissionId = ''; renderSubmissionList(); submissionsModal.classList.add('open'); };
 document.getElementById('closeSubmissions').onclick = ()=> submissionsModal.classList.remove('open');
@@ -629,6 +689,45 @@ document.getElementById('closeLevel').onclick = ()=> levelModal.classList.remove
 
 typeFilter.onchange = ()=>{ selectedSubmissionId = ''; renderSubmissionList(); };
 dateSort.onchange = ()=>{ selectedSubmissionId = ''; renderSubmissionList(); };
+
+document.getElementById('openAddLevel').onclick = ()=>{
+  document.getElementById('addLevelMsg').textContent = '';
+  addLevelModal.classList.add('open');
+};
+document.getElementById('closeAddLevel').onclick = ()=> addLevelModal.classList.remove('open');
+
+document.getElementById('submitAddLevel').onclick = async ()=>{
+  const msg = document.getElementById('addLevelMsg');
+  msg.textContent = '';
+  const text = document.getElementById('addLevelText').value.trim();
+  const link = document.getElementById('addLevelLink').value.trim();
+  const fileUrl = document.getElementById('addLevelFile').value.trim();
+  const builder = document.getElementById('addLevelBuilder').value.trim();
+  const verifier = document.getElementById('addLevelVerifier').value.trim();
+  const rank = Number(document.getElementById('addLevelRank').value || 0);
+
+  if(!text){ msg.textContent = 'Укажи название уровня.'; return; }
+  if(!rank){ msg.textContent = 'Укажи место в листе.'; return; }
+
+  try {
+    const ref = await addDoc(collection(db,'levels'), {
+      text, link, fileUrl, builder: builder || '—', verifier: verifier || '—',
+      rank, status: 'active',
+      addedBy: me.uid,
+      addedByNick: me.nick ?? 'elder',
+      createdAt: serverTimestamp()
+    });
+    await loadData();
+    await placeLevel(ref.id, rank);
+    await recalcAllPoints();
+    await loadData();
+    renderMainList();
+    await logModeratorAction('add_level', { levelId: ref.id, rank, text, link });
+    msg.textContent = 'Уровень добавлен.';
+  } catch (e) {
+    msg.textContent = getNetworkErrorMessage(e);
+  }
+};
 </script>
 </body>
 </html>
