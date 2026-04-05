@@ -17,6 +17,8 @@
   <div id="list"></div>
 </div>
 
+<div id="modal" class="dialog-backdrop"><div class="dialog"><div class="page-header"><h2 id="mTitle">Инфо</h2><button id="mClose" class="btn-ghost">Закрыть</button></div><div id="mBody"></div></div></div>
+
 <script type="module">
 import { auth, db, getNetworkErrorMessage } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
