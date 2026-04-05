@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Меню листа старшего модератора</title>
+<link rel="stylesheet" href="hud.css">
+<style>
+  .layout{display:grid;grid-template-columns:minmax(0,1fr) 260px;gap:12px}
+  .side{position:sticky;top:16px;align-self:start}
+  @media (max-width: 900px){.layout{grid-template-columns:1fr}.side{position:static}}
+</style>
+</head>
+<body>
+<div class="hud" style="max-width:1240px;margin:30px auto;">
+  <div class="page-header">
+    <h1 style="margin:0;">Меню листа старшего модератора</h1>
+    <button id="back" class="btn-ghost">Назад</button>
+  </div>
+  <p id="status" style="color:#00ffff;">Загрузка...</p>
+
+  <div class="layout">
+    <div>
+      <h2 style="margin-top:0;">Актуальный лист уровней</h2>
+      <div id="levels"></div>
+    </div>
+
+    <aside class="card side">
+      <h3 style="margin-top:0;">Управление</h3>
+      <div class="top-actions" style="flex-direction:column;">
+        <button id="openSettings">Параметры очков</button>
+        <button id="openSubmissions">Все отправки</button>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<div id="levelModal" class="dialog-backdrop">
+  <div class="dialog">
+    <div class="page-header">
+      <h2 id="levelTitle" style="margin:0;">Уровень</h2>
+      <button id="closeLevel" class="btn-ghost">Закрыть</button>
+    </div>
+    <div id="levelBody"></div>
+  </div>
+</div>
+
+<div id="settingsModal" class="dialog-backdrop">
+  <div class="dialog">
+    <div class="page-header">
+      <h2 style="margin:0;">Параметры формулы</h2>
+      <button id="closeSettings" class="btn-ghost">Закрыть</button>
+    </div>
+    <div class="card">
+      <label class="small">maximumPoints</label>
+      <input id="maximumPoints" type="number" min="1" step="1">
+      <label class="small">rankDecayFactor</label>
+      <input id="rankDecayFactor" type="number" min="0" step="0.1">
+      <label class="small">repeatPenaltyPower</label>
+      <input id="repeatPenaltyPower" type="number" min="0" step="0.01">
+      <p class="small">Очки = maximumPoints × exp(-rankDecayFactor × x) ÷ k^repeatPenaltyPower</p>
+      <button id="saveSettings">Сохранить параметры</button>
+      <p id="settingsMsg" class="small"></p>
+    </div>
+  </div>
+</div>
+
+<div id="subsModal" class="dialog-backdrop">
+  <div class="dialog" style="width:min(1020px,95vw)">
+    <div class="page-header">
+      <h2 style="margin:0;">Все отправки</h2>
+      <button id="closeSubs" class="btn-ghost">Закрыть</button>
+    </div>
+    <div class="toolbar">
+      <input id="subSearch" placeholder="Поиск по нику/тексту">
+      <select id="subType">
+        <option value="all">Все типы</option>
+        <option value="level">Уровни</option>
+        <option value="completion">Прохождения</option>
+        <option value="appeal">Апелляции</option>
+      </select>
+      <select id="subStatus">
+        <option value="all">Все статусы</option>
+        <option value="pending">Ожидают</option>
+        <option value="approved">Одобренные</option>
+        <option value="rejected">Отклонённые</option>
+      </select>
+    </div>
+    <div id="subList"></div>
+    <div id="subDetail" style="margin-top:10px;"></div>
+  </div>
+</div>
+
+<script type="module">
+import { auth, db, getNetworkErrorMessage } from './firebase.js';
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
+import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, orderBy, query, serverTimestamp, setDoc, updateDoc, where } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+
+const statusEl = document.getElementById('status');
+const levelsEl = document.getElementById('levels');
+const levelModal = document.getElementById('levelModal');
+const settingsModal = document.getElementById('settingsModal');
+const subsModal = document.getElementById('subsModal');
+
+let elder = null;
+let levels = [];
+let submissions = [];
+let scoring = { maximumPoints:100, rankDecayFactor:3, repeatPenaltyPower:0.5 };
+
+document.getElementById('back').onclick = ()=> location.href='elder.html';
+document.getElementById('closeLevel').onclick = ()=> levelModal.classList.remove('open');
+document.getElementById('closeSettings').onclick = ()=> settingsModal.classList.remove('open');
+document.getElementById('closeSubs').onclick = ()=> subsModal.classList.remove('open');
+document.getElementById('openSettings').onclick = ()=> settingsModal.classList.add('open');
+document.getElementById('openSubmissions').onclick = ()=> subsModal.classList.add('open');
+document.getElementById('subSearch').oninput = ()=> renderSubmissionList();
+document.getElementById('subType').onchange = ()=> renderSubmissionList();
+document.getElementById('subStatus').onchange = ()=> renderSubmissionList();
+
+function calculate(rank, size, k){
+  const n = Math.max(2, Number(size || 2));
+  const r = Math.max(1, Math.min(Number(rank || 1), n));
+  const x = (r - 1) / (n - 1);
+  const v = scoring.maximumPoints * Math.exp(-scoring.rankDecayFactor * x) / Math.pow(Math.max(1, k), scoring.repeatPenaltyPower);
+  return Math.round(v * 100) / 100;
+}
+
+async function loadScoring(){
+  const snap = await getDoc(doc(db,'settings','scoring'));
+  const s = snap.exists() ? snap.data() : {};
+  scoring = {
+    maximumPoints: Number(s.maximumPoints ?? s.maxPoints ?? 100),
+    rankDecayFactor: Number(s.rankDecayFactor ?? s.decayA ?? 3),
+    repeatPenaltyPower: Number(s.repeatPenaltyPower ?? s.grindPower ?? 0.5)
+  };
+  document.getElementById('maximumPoints').value = String(scoring.maximumPoints);
+  document.getElementById('rankDecayFactor').value = String(scoring.rankDecayFactor);
+  document.getElementById('repeatPenaltyPower').value = String(scoring.repeatPenaltyPower);
+}
+
+async function placeLevelAtRank(levelId, targetRank){
+  const snap = await getDocs(query(collection(db,'levels'), orderBy('rank','asc')));
+  const active = [];
+  snap.forEach(d => { const l = d.data(); if(l.status !== 'archived') active.push({ id:d.id, ...l }); });
+
+  const moving = active.find(l => l.id === levelId);
+  if(!moving) return;
+
+  const without = active.filter(l => l.id !== levelId);
+  let idx = Number(targetRank) - 1;
+  if(idx < 0) idx = 0;
+  if(idx > without.length) idx = without.length;
+  without.splice(idx, 0, moving);
+
+  for(let i = 0; i < without.length; i++){
+    const rank = i + 1;
+    if(Number(without[i].rank ?? 0) !== rank){
+      await updateDoc(doc(db,'levels',without[i].id), { rank });
+    }
+  }
+}
+
+async function recalcCompletions(){
+  const [lvlSnap, compSnap] = await Promise.all([
+    getDocs(query(collection(db,'levels'), orderBy('rank','asc'))),
+    getDocs(query(collection(db,'completion_submissions'), where('status','==','approved')))
+  ]);
+
+  const rankById = new Map();
+  let size = 0;
+  lvlSnap.forEach(d => {
+    const l = d.data();
+    if(l.status === 'archived') return;
+    rankById.set(d.id, Number(l.rank ?? 0));
+    size++;
+  });
+  size = Math.max(2, size);
+
+  const byPlayer = new Map();
+  compSnap.forEach(d => {
+    const c = { id:d.id, ...d.data() };
+    if(!byPlayer.has(c.playerId)) byPlayer.set(c.playerId, []);
+    byPlayer.get(c.playerId).push(c);
+  });
+
+  for(const [playerId, items] of byPlayer.entries()){
+    items.sort((a,b) => (a.reviewedAt?.seconds ?? 0) - (b.reviewedAt?.seconds ?? 0));
+    let sum = 0;
+    for(let i = 0; i < items.length; i++){
+      const rank = rankById.get(items[i].levelId) ?? Number(items[i].listRank ?? 1);
+      const earned = calculate(rank, size, i + 1);
+      sum += earned;
+      await updateDoc(doc(db,'completion_submissions',items[i].id), {
+        awardedPoints:earned,
+        listRank:rank,
+        listQuantity:size,
+        scoreK:i + 1
+      });
+    }
+    await updateDoc(doc(db,'users',playerId), { points: Math.round(sum * 100) / 100 });
+  }
+}
+
+document.getElementById('saveSettings').onclick = async ()=>{
+  const maximumPoints = Number(document.getElementById('maximumPoints').value);
+  const rankDecayFactor = Number(document.getElementById('rankDecayFactor').value);
+  const repeatPenaltyPower = Number(document.getElementById('repeatPenaltyPower').value);
+
+  await setDoc(doc(db,'settings','scoring'), {
+    maximumPoints,
+    rankDecayFactor,
+    repeatPenaltyPower,
+    maxPoints:maximumPoints,
+    decayA:rankDecayFactor,
+    grindPower:repeatPenaltyPower,
+    updatedBy:elder.uid,
+    updatedAt:serverTimestamp()
+  }, { merge:true });
+
+  document.getElementById('settingsMsg').textContent = 'Сохранено.';
+  await loadScoring();
+  await recalcCompletions();
+  await renderLevels();
+};
+
+async function renderLevels(){
+  levelsEl.innerHTML = 'Загрузка листа...';
+  const snap = await getDocs(query(collection(db,'levels'), orderBy('rank','asc')));
+  levels = [];
+  snap.forEach(d => {
+    const l = d.data();
+    if(l.status !== 'archived') levels.push({ id:d.id, ...l });
+  });
+
+  if(!levels.length){ levelsEl.innerHTML = '<p>Лист пуст.</p>'; return; }
+  const size = Math.max(2, levels.length);
+  levelsEl.innerHTML = '';
+
+  levels.forEach(l => {
+    const row = document.createElement('div');
+    row.className = 'row list-item clickable';
+    row.append(
+      Object.assign(document.createElement('div'), { textContent:`#${l.rank ?? '—'}` }),
+      Object.assign(document.createElement('div'), { textContent:l.text ?? 'Без названия' }),
+      Object.assign(document.createElement('div'), { textContent:String(calculate(l.rank, size, 1)) })
+    );
+    row.onclick = ()=> openLevel(l);
+    levelsEl.appendChild(row);
+  });
+}
+
+function openLevel(level){
+  document.getElementById('levelTitle').textContent = `Уровень #${level.rank ?? '—'}`;
+  document.getElementById('levelBody').innerHTML = `
+    <label class="small">Название/описание</label>
+    <textarea id="lText">${level.text ?? ''}</textarea>
+    <label class="small">Ссылка</label>
+    <input id="lLink" value="${level.link ?? ''}">
+    <label class="small">Файл</label>
+    <input id="lFile" value="${level.fileUrl ?? ''}">
+    <label class="small">Место в листе</label>
+    <input id="lRank" type="number" min="1" value="${Number(level.rank ?? 1)}">
+    <div class="top-actions">
+      <button id="saveLevel">Сохранить</button>
+      <button id="deleteLevel" class="btn-danger">Удалить</button>
+    </div>
+  `;
+
+  document.getElementById('saveLevel').onclick = async ()=>{
+    const rank = Number(document.getElementById('lRank').value);
+    await updateDoc(doc(db,'levels',level.id), {
+      text:document.getElementById('lText').value.trim(),
+      link:document.getElementById('lLink').value.trim(),
+      fileUrl:document.getElementById('lFile').value.trim(),
+      rank,
+      updatedBy:elder.uid,
+      updatedAt:serverTimestamp()
+    });
+    await placeLevelAtRank(level.id, rank);
+    await recalcCompletions();
+    levelModal.classList.remove('open');
+    await renderLevels();
+  };
+
+  document.getElementById('deleteLevel').onclick = async ()=>{
+    if(!confirm('Удалить уровень?')) return;
+    await deleteDoc(doc(db,'levels',level.id));
+    await recalcCompletions();
+    levelModal.classList.remove('open');
+    await renderLevels();
+  };
+
+  levelModal.classList.add('open');
+}
+
+async function loadSubmissions(){
+  const [a,b,c] = await Promise.all([
+    getDocs(collection(db,'level_submissions')),
+    getDocs(collection(db,'completion_submissions')),
+    getDocs(collection(db,'appeals'))
+  ]);
+
+  submissions = [];
+  a.forEach(d => submissions.push({ id:d.id, type:'level', data:d.data() }));
+  b.forEach(d => submissions.push({ id:d.id, type:'completion', data:d.data() }));
+  c.forEach(d => submissions.push({ id:d.id, type:'appeal', data:d.data() }));
+
+  renderSubmissionList();
+}
+
+function renderSubmissionList(){
+  const q = document.getElementById('subSearch').value.trim().toLowerCase();
+  const type = document.getElementById('subType').value;
+  const st = document.getElementById('subStatus').value;
+  const box = document.getElementById('subList');
+  box.innerHTML = '';
+
+  const filtered = submissions.filter(s => {
+    if(type !== 'all' && s.type !== type) return false;
+    if(st !== 'all' && s.data.status !== st) return false;
+    const hay = `${s.data.nick ?? ''} ${s.data.text ?? ''} ${s.data.status ?? ''}`.toLowerCase();
+    return !q || hay.includes(q);
+  });
+
+  if(!filtered.length){ box.innerHTML = '<p>Ничего не найдено.</p>'; return; }
+
+  filtered.forEach(item => {
+    const row = document.createElement('div');
+    row.className = 'list-item clickable';
+    row.innerHTML = `<b>[${item.type}]</b> ${item.data.nick ?? 'Без ника'} · ${item.data.status ?? '—'}<p class="small">${item.data.text ?? ''}</p>`;
+    row.onclick = ()=> openSubmission(item);
+    box.appendChild(row);
+  });
+}
+
+function openSubmission(item){
+  const d = item.data;
+  const detail = document.getElementById('subDetail');
+  detail.innerHTML = `
+    <div class="card">
+      <h3 style="margin-top:0;">Заявка [${item.type}]</h3>
+      <p><b>Ник:</b> ${d.nick ?? '—'}</p>
+      <p><b>Статус:</b> ${d.status ?? '—'}</p>
+      <p>${d.text ?? ''}</p>
+      <p class="small">Ссылка: ${d.link ?? '—'} · Файл: ${d.fileUrl ?? '—'}</p>
+      <input id="dNote" placeholder="Комментарий">
+      <div id="dActions" class="top-actions"></div>
+    </div>
+  `;
+  const actions = document.getElementById('dActions');
+
+  if(item.type === 'level' && d.status === 'pending'){
+    actions.innerHTML = '<input id="dRank" type="number" min="1" placeholder="Место в листе"><button id="approve">Одобрить</button><button id="reject" class="btn-danger">Отклонить</button>';
+    document.getElementById('approve').onclick = async ()=>{
+      const rank = Number(document.getElementById('dRank').value);
+      if(!rank){ alert('Укажи место'); return; }
+      const ref = await addDoc(collection(db,'levels'), {
+        link:d.link ?? '', text:d.text ?? '', fileUrl:d.fileUrl ?? '', rank,
+        addedBy:elder.uid, addedByNick:elder.nick ?? 'elder', createdAt:serverTimestamp(), sourceSubmissionId:item.id, status:'active'
+      });
+      await placeLevelAtRank(ref.id, rank);
+      await updateDoc(doc(db,'level_submissions',item.id), {
+        status:'approved', note:document.getElementById('dNote').value.trim(), reviewedBy:elder.uid, reviewedAt:serverTimestamp(), finalRank:rank
+      });
+      await recalcCompletions();
+      await renderLevels();
+      await loadSubmissions();
+      detail.innerHTML = '';
+    };
+    document.getElementById('reject').onclick = async ()=>{
+      await updateDoc(doc(db,'level_submissions',item.id), {
+        status:'rejected', note:document.getElementById('dNote').value.trim() || 'Отклонено', reviewedBy:elder.uid, reviewedAt:serverTimestamp()
+      });
+      await loadSubmissions();
+      detail.innerHTML = '';
+    };
+  } else if(item.type === 'completion' && d.status === 'pending'){
+    const options = levels.map(l => `<option value="${l.id}">#${l.rank} · ${String(l.text ?? '').slice(0, 70)}</option>`).join('');
+    actions.innerHTML = `<select id="dLevel"><option value="">Выбери уровень</option>${options}</select><button id="approve">Одобрить</button><button id="reject" class="btn-danger">Отклонить</button>`;
+
+    document.getElementById('approve').onclick = async ()=>{
+      const levelId = document.getElementById('dLevel').value;
+      const level = levels.find(l => l.id === levelId);
+      if(!level){ alert('Выбери уровень'); return; }
+
+      const userRef = doc(db,'users',d.playerId);
+      const userSnap = await getDoc(userRef);
+      const userData = userSnap.exists() ? userSnap.data() : null;
+      if(!userData){ alert('Игрок не найден'); return; }
+
+      const compsSnap = await getDocs(query(collection(db,'completion_submissions'), where('playerId','==',d.playerId)));
+      let approved = 0;
+      compsSnap.forEach(x => { if(x.data().status === 'approved') approved++; });
+      const k = approved + 1;
+      const size = Math.max(2, levels.length);
+      const earned = calculate(level.rank, size, k);
+
+      await updateDoc(userRef, { points:Number(userData.points ?? 0) + earned });
+      await updateDoc(doc(db,'completion_submissions',item.id), {
+        status:'approved', note:document.getElementById('dNote').value.trim(), reviewedBy:elder.uid, reviewedAt:serverTimestamp(),
+        awardedPoints:earned, listRank:Number(level.rank ?? 1), listQuantity:size, scoreK:k, levelId
+      });
+      await recalcCompletions();
+      await loadSubmissions();
+      detail.innerHTML = '';
+    };
+
+    document.getElementById('reject').onclick = async ()=>{
+      await updateDoc(doc(db,'completion_submissions',item.id), {
+        status:'rejected', note:document.getElementById('dNote').value.trim() || 'Отклонено', reviewedBy:elder.uid, reviewedAt:serverTimestamp()
+      });
+      await loadSubmissions();
+      detail.innerHTML = '';
+    };
+  } else if(item.type === 'appeal' && d.status === 'pending'){
+    actions.innerHTML = '<button id="approve">Удовлетворить</button><button id="reject" class="btn-danger">Отклонить</button>';
+    document.getElementById('approve').onclick = async ()=>{
+      await updateDoc(doc(db,'appeals',item.id), {
+        status:'approved', note:document.getElementById('dNote').value.trim() || 'Апелляция удовлетворена', reviewedBy:elder.uid, reviewedAt:serverTimestamp()
+      });
+      await loadSubmissions();
+      detail.innerHTML = '';
+    };
+    document.getElementById('reject').onclick = async ()=>{
+      await updateDoc(doc(db,'appeals',item.id), {
+        status:'rejected', note:document.getElementById('dNote').value.trim() || 'Апелляция отклонена', reviewedBy:elder.uid, reviewedAt:serverTimestamp()
+      });
+      await loadSubmissions();
+      detail.innerHTML = '';
+    };
+  } else {
+    actions.innerHTML = '<p class="small">Заявка уже обработана.</p>';
+  }
+}
+
+onAuthStateChanged(auth, async user => {
+  if(!user) return location.href='index.html';
+  try {
+    const meSnap = await getDoc(doc(db,'users',user.uid));
+    const me = meSnap.exists() ? meSnap.data() : null;
+    if(!me || me.situation !== 'verified') return location.href='nick.html';
+    if(me.role !== 'elder') return location.href='main.html';
+
+    elder = { uid:user.uid, nick:me.nick ?? 'elder' };
+    await loadScoring();
+    await renderLevels();
+    await loadSubmissions();
+    statusEl.textContent = '';
+  } catch (error) {
+    console.error(error);
+    statusEl.textContent = getNetworkErrorMessage(error);
+  }
+});
+</script>
+</body>
+</html>
