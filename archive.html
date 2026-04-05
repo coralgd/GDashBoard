@@ -8,6 +8,7 @@
   .folder{cursor:pointer}
   .path{margin:8px 0}
   .tag{font-size:11px;opacity:.8;padding:2px 6px;border:1px solid rgba(0,180,255,.35);border-radius:999px;margin-left:8px}
+  .hidden{display:none!important}
 </style>
 </head>
 <body>
@@ -17,17 +18,34 @@
 </div>
 <div class="hud" style="max-width:1200px;margin:40px auto;">
   <div class="page-header"><h1>Архив</h1><button id="back" class="btn-ghost">На главную</button></div>
+  <div class="top-actions">
+    <button id="openModeratorLog" class="btn-ghost hidden">Журнал действий модеров</button>
+  </div>
   <p id="status" style="color:#00ffff;">Загрузка...</p>
   <div id="archive"></div>
+</div>
+
+<div id="moderatorLogModal" class="dialog-backdrop">
+  <div class="dialog" style="width:min(980px,96vw);max-height:92vh;overflow:auto;">
+    <div class="page-header">
+      <h2 style="margin:0;">Журнал действий модеров</h2>
+      <button id="closeModeratorLog" class="btn-ghost">Закрыть</button>
+    </div>
+    <div id="moderatorLogList"></div>
+  </div>
 </div>
 
 <script type="module">
 import { auth, db, getNetworkErrorMessage } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import { collection, getDocs, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+import { collection, getDocs, doc, getDoc, limit, orderBy, query } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
 document.getElementById('back').onclick = ()=> location.href='main.html';
 const statusEl = document.getElementById('status');
+const openModeratorLogBtn = document.getElementById('openModeratorLog');
+const moderatorLogModal = document.getElementById('moderatorLogModal');
+const moderatorLogList = document.getElementById('moderatorLogList');
+let myRole = 'player';
 
 const state = {
   search: '',
@@ -230,6 +248,35 @@ async function loadData(){
   });
 }
 
+function formatDate(ts){
+  return ts?.seconds ? new Date(ts.seconds * 1000).toLocaleString('ru-RU') : '—';
+}
+
+async function loadModeratorLog(){
+  moderatorLogList.innerHTML = '<p>Загрузка журнала…</p>';
+  try {
+    const snap = await getDocs(query(collection(db,'moderator_actions'), orderBy('createdAt','desc'), limit(200)));
+    if(snap.empty){
+      moderatorLogList.innerHTML = '<p>Журнал пока пуст.</p>';
+      return;
+    }
+    let html = '';
+    snap.forEach((d, i)=>{
+      const x = d.data();
+      html += `
+        <div class="card">
+          <b>#${i+1} · ${x.action ?? 'action'}</b>
+          <p class="small">${formatDate(x.createdAt)} · ${x.actorNick ?? '—'} (${x.actorRole ?? 'moderator'})</p>
+          <pre class="small" style="white-space:pre-wrap;margin:0;">${JSON.stringify(x.details ?? {}, null, 2)}</pre>
+        </div>
+      `;
+    });
+    moderatorLogList.innerHTML = html;
+  } catch (e) {
+    moderatorLogList.innerHTML = `<p>${getNetworkErrorMessage(e)}</p>`;
+  }
+}
+
 onAuthStateChanged(auth, async user=>{
   if(!user) return location.href='index.html';
   try {
@@ -237,6 +284,8 @@ onAuthStateChanged(auth, async user=>{
     const me = meSnap.exists() ? meSnap.data() : null;
     if(!me || me.situation!=='verified') return location.href='nick.html';
     if(me.role!=='moderator' && me.role!=='elder') return location.href='main.html';
+    myRole = me.role;
+    if(myRole === 'elder') openModeratorLogBtn.classList.remove('hidden');
 
     await loadData();
     statusEl.textContent='';
@@ -245,6 +294,12 @@ onAuthStateChanged(auth, async user=>{
     statusEl.textContent = getNetworkErrorMessage(e);
   }
 });
+
+openModeratorLogBtn.onclick = async ()=>{
+  await loadModeratorLog();
+  moderatorLogModal.classList.add('open');
+};
+document.getElementById('closeModeratorLog').onclick = ()=> moderatorLogModal.classList.remove('open');
 </script>
 </body>
 </html>
