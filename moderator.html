@@ -7,6 +7,14 @@
 <style>
   .panel{display:none;margin-top:14px}
   .panel.active{display:block}
+  .layout{display:grid;grid-template-columns:minmax(0,1fr) 260px;gap:16px;align-items:start}
+  .side-tools{position:sticky;top:16px}
+  .side-tools .card{display:flex;flex-direction:column;gap:10px}
+  .toolbar-btn{width:100%}
+  @media (max-width: 900px){
+    .layout{grid-template-columns:1fr}
+    .side-tools{position:static}
+  }
 </style>
 </head>
 <body>
@@ -17,16 +25,23 @@
 <div class="hud" style="max-width:1150px;margin:40px auto;">
   <div class="page-header">
     <h1>Панель модератора</h1>
-    <div class="top-actions" style="margin:0;">
-      <button id="toggleView" class="btn-hero">Меню листа</button>
-      <button id="openSubmissions" class="btn-success">Отправки</button>
-      <button id="openSendMenu" class="btn-ghost">Отправить</button>
-    </div>
+    <button id="backMain" class="btn-ghost">На главную</button>
   </div>
   <p id="status" style="color:#00ffff;">Загрузка...</p>
 
-  <div id="playersPanel" class="panel active"></div>
-  <div id="listMenuPanel" class="panel"></div>
+  <div class="layout">
+    <div>
+      <div id="playersPanel" class="panel active"></div>
+      <div id="listMenuPanel" class="panel"></div>
+    </div>
+    <aside class="side-tools">
+      <div class="card">
+        <button id="toggleView" class="toolbar-btn btn-hero">Меню листа</button>
+        <button id="openSubmissions" class="toolbar-btn btn-success">Отправки</button>
+        <button id="openSendMenu" class="toolbar-btn btn-ghost">Отправить</button>
+      </div>
+    </aside>
+  </div>
 </div>
 
 <div id="modal" class="dialog-backdrop">
@@ -76,6 +91,7 @@ function setPanel(name){
 }
 
 toggleViewBtn.onclick = ()=> setPanel(currentPanel === 'players' ? 'list' : 'players');
+document.getElementById('backMain').onclick = ()=> location.href='main.html';
 document.getElementById('openSubmissions').onclick = async ()=>{
   await loadPendingSubmissions();
   renderPendingSubmissions();

@@ -303,7 +303,6 @@ async function openPlayerModal(playerId){
   const approved = completions.filter(x=>x.status==='approved');
 
   document.getElementById('playerTitle').textContent = `Игрок: ${player.nick ?? 'Без ника'}`;
-  const roleNegative = player.role === 'moderator';
   const verNegative = player.situation === 'verified';
 
   document.getElementById('playerBody').innerHTML = `
@@ -311,10 +310,15 @@ async function openPlayerModal(playerId){
       <label>Ник</label><input id="pNick" value="${String(player.nick ?? '').replace(/"/g,'&quot;')}">
       <label>Почта</label><input id="pEmail" value="${String(player.email ?? '').replace(/"/g,'&quot;')}">
       <label>Очки</label><input id="pPoints" type="number" value="${Number(player.points ?? 0)}">
+      <label>Роль</label>
+      <select id="pRole">
+        <option value="player" ${player.role==='player'?'selected':''}>Игрок</option>
+        <option value="moderator" ${player.role==='moderator'?'selected':''}>Модератор</option>
+        <option value="elder" ${player.role==='elder'?'selected':''}>Старший модератор</option>
+      </select>
       <div class="top-actions">
         <button id="savePlayer">Сохранить профиль</button>
         <button id="toggleVerify" class="${verNegative ? 'danger' : ''}">${verNegative ? 'Снять верификацию' : 'Верифицировать'}</button>
-        <button id="toggleRole" class="${roleNegative ? 'danger' : ''}">${roleNegative ? 'Снять модерку' : 'Поставить модерку'}</button>
         <button id="deletePlayer" class="danger">Удалить аккаунт</button>
       </div>
     </div>
@@ -351,7 +355,8 @@ async function openPlayerModal(playerId){
     await updateDoc(doc(db,'users',playerId), {
       nick: document.getElementById('pNick').value.trim() || 'Без ника',
       email: document.getElementById('pEmail').value.trim(),
-      points: Number(document.getElementById('pPoints').value || 0)
+      points: Number(document.getElementById('pPoints').value || 0),
+      role: document.getElementById('pRole').value || 'player'
     });
     await loadData();
     renderMainList();
@@ -361,14 +366,6 @@ async function openPlayerModal(playerId){
   document.getElementById('toggleVerify').onclick = async ()=>{
     const newSituation = player.situation === 'verified' ? 'not requested' : 'verified';
     await updateDoc(doc(db,'users',playerId), { situation:newSituation });
-    await loadData();
-    renderMainList();
-    await openPlayerModal(playerId);
-  };
-
-  document.getElementById('toggleRole').onclick = async ()=>{
-    const newRole = player.role === 'moderator' ? 'player' : 'moderator';
-    await updateDoc(doc(db,'users',playerId), { role:newRole });
     await loadData();
     renderMainList();
     await openPlayerModal(playerId);
