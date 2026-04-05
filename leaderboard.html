@@ -41,7 +41,10 @@
     </div>
     <div id="infoBody"></div>
   </div>
+  <div id="levelsPanel" class="panel"><div id="levels"></div></div>
 </div>
+
+<div id="modal" class="dialog-backdrop"><div class="dialog"><div class="page-header"><h2 id="mTitle">Инфо</h2><button id="mClose" class="btn-ghost">Закрыть</button></div><div id="mBody"></div></div></div>
 
 <script type="module">
 import { auth, db, getNetworkErrorMessage } from './firebase.js';
@@ -120,6 +123,8 @@ function renderPlayers(){
     row.onclick = ()=> openPlayer(u);
     playersList.appendChild(row);
   });
+  if(!state.levels.length) box.innerHTML='<p>Лист уровней пуст.</p>';
+}
 
   if(!filtered.length) playersList.append(text('p', 'Игроки не найдены.'));
 }
