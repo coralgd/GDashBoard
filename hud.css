@@ -9,23 +9,47 @@ body {
   color: #d8f2ff;
   min-height: 100vh;
   overflow-x: hidden;
+  position: relative;
 }
 
-/* GRID BACKGROUND */
+body > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* GRID BACKGROUND (PERSPECTIVE, MOVING TOWARDS VIEWER) */
 body::before {
+  content: "";
+  position: fixed;
+  left: -25vw;
+  right: -25vw;
+  bottom: -72vh;
+  height: 240vh;
+  background:
+    repeating-linear-gradient(to right, rgba(0,180,255,0.22) 0 2px, transparent 2px 86px),
+    repeating-linear-gradient(to bottom, rgba(0,180,255,0.18) 0 2px, transparent 2px 72px);
+  transform-origin: bottom center;
+  transform: perspective(980px) rotateX(74deg) translateY(0);
+  animation: gridApproach 7.5s linear infinite;
+  z-index: 0;
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+body::after {
   content: "";
   position: fixed;
   inset: 0;
   background:
-    linear-gradient(rgba(0,140,255,0.07) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(0,140,255,0.07) 1px, transparent 1px);
-  background-size: 70px 70px;
-  animation: gridMove 45s linear infinite;
-  z-index: -2;
+    radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.45) 100%),
+    linear-gradient(to top, rgba(3,8,16,0.82), rgba(3,8,16,0.15) 45%, transparent 85%);
+  z-index: 0;
+  pointer-events: none;
 }
-@keyframes gridMove {
-  from { background-position: 0 0; }
-  to { background-position: 700px 700px; }
+
+@keyframes gridApproach {
+  from { transform: perspective(980px) rotateX(74deg) translateY(0); }
+  to   { transform: perspective(980px) rotateX(74deg) translateY(72px); }
 }
 
 /* HUD PANEL */
