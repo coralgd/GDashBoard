@@ -91,7 +91,7 @@ async function loadUsers(){
   snap.forEach(d=>{const u=d.data();const row=document.createElement('div');row.className='row list-item clickable';if(u.role==='moderator')row.classList.add('moderator');if(u.role==='elder')row.classList.add('elder');if(u.situation!=='verified')row.classList.add('unverified');row.innerHTML=`<div>${i++}</div><div>${u.nick??'Без ника'}</div><div>${Number(u.points??0)}</div>`;row.onclick=()=>openUser({id:d.id,...u});usersEl.appendChild(row);});
 }
 
-onAuthStateChanged(auth, async user=>{
+onAuthStateChanged(auth, async user => {
   if(!user) return location.href='index.html';
   try {
     const me=await getDoc(doc(db,'users',user.uid));

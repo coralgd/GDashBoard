@@ -37,7 +37,7 @@ async function loadUsers(){
     };
     usersEl.appendChild(row);
   });
-}
+  users.sort((a,b) => String(a.nick ?? '').localeCompare(String(b.nick ?? ''), 'ru'));
 
 onAuthStateChanged(auth, async user=>{
   if(!user) return location.href='index.html';
