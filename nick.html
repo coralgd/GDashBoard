@@ -20,7 +20,7 @@
 
 <script type="module">
 import { auth, db } from './firebase.js';
-import { onAuthStateChanged } from
+import { onAuthStateChanged, signOut } from
   "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
 import {
   doc, getDoc, setDoc,
@@ -44,6 +44,11 @@ onAuthStateChanged(auth, async (user) => {
 
     if (snap.exists()) {
       const data = snap.data();
+      if (data.accountFrozen) {
+        await signOut(auth);
+        error.textContent = 'Аккаунт заморожен. Вход запрещен.';
+        return;
+      }
       if (data.situation === 'verified' && data.nick) {
         location.href = 'main.html';
         return;

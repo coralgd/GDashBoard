@@ -16,6 +16,7 @@
   <p id="userInfo"></p>
   <p id="userPoints"></p>
   <p id="userPlace"></p>
+  <div id="messagesBox" class="card" style="text-align:left;margin-top:12px;"></div>
 
   <div class="top-actions" style="justify-content:center;">
     <button id="leaderboardBtn" class="btn-hero">Лидерборд</button>
@@ -28,14 +29,15 @@
 
 <script type="module">
 import { auth, db, getNetworkErrorMessage } from './firebase.js';
-import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import { doc, getDoc, collection, getDocs, query, orderBy } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
+import { doc, getDoc, collection, getDocs, query, orderBy, where } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
 const statusEl = document.getElementById('status');
 const info = document.getElementById('userInfo');
 const pointsEl = document.getElementById('userPoints');
 const placeEl = document.getElementById('userPlace');
 const err = document.getElementById('err');
+const messagesBox = document.getElementById('messagesBox');
 
 onAuthStateChanged(auth, async user => {
   if(!user) return location.href='index.html';
@@ -43,6 +45,11 @@ onAuthStateChanged(auth, async user => {
     const userSnap = await getDoc(doc(db,'users',user.uid));
     const profile = userSnap.exists() ? userSnap.data() : null;
     if(!profile || profile.situation !== 'verified') return location.href='nick.html';
+    if(profile.accountFrozen){
+      await signOut(auth);
+      err.textContent='Аккаунт заморожен. Вход запрещен.';
+      return;
+    }
 
     info.textContent = `Ник: ${profile.nick ?? '—'}`;
     pointsEl.textContent = `Баллы: ${Number(profile.points ?? 0)}`;
@@ -57,6 +64,11 @@ onAuthStateChanged(auth, async user => {
       if(d.id===user.uid) place = String(rank);
     });
     placeEl.textContent = `Место: ${place}`;
+    const msgSnap = await getDocs(query(collection(db,'moderator_messages'), where('playerId','==',user.uid)));
+    const messages = [];
+    msgSnap.forEach(d=>messages.push(d.data()));
+    messages.sort((a,b)=>(b.createdAt?.seconds ?? 0)-(a.createdAt?.seconds ?? 0));
+    messagesBox.innerHTML = `<h3 style="margin-top:0;">Сообщения от модераторов</h3>${messages.map(m=>`<div class="list-item"><b>${m.authorNick ?? 'модератор'}</b><p class="small">${m.text ?? ''}</p></div>`).join('') || '<p class="small">Пока нет сообщений.</p>'}`;
 
     document.getElementById('leaderboardBtn').onclick = ()=> location.href='leaderboard.html';
     document.getElementById('openLevelsMenu').onclick = ()=> location.href='levels-menu.html';
