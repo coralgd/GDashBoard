@@ -59,6 +59,20 @@ function renderLevels(){
   });
 }
 
+async function loadRefs(uid){
+  const sel = document.getElementById('ref');
+  const snap = await getDocs(query(collection(db,'completion_submissions'), where('playerId','==',uid)));
+  const items = [];
+  snap.forEach(d=>items.push({id:d.id,...d.data()}));
+  items.sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
+  items.slice(0,50).forEach(x=>{
+    const o = document.createElement('option');
+    o.value = x.id;
+    o.textContent = `[${x.status ?? 'pending'}] ${String(x.text ?? '').slice(0,80) || 'Без текста'}`;
+    sel.appendChild(o);
+  });
+}
+
 onAuthStateChanged(auth, async u=>{
   if(!u) return location.href='index.html';
   try {
