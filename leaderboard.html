@@ -7,6 +7,9 @@
 <style>
   .panel{display:none}
   .panel.active{display:block}
+  #modal .dialog{width:min(1100px,96vw);max-height:95vh;min-height:70vh}
+  .modal-table{width:100%;border-collapse:collapse;margin-top:8px}
+  .modal-table th,.modal-table td{border:1px solid #3f8fcc55;padding:8px;text-align:left;vertical-align:top}
 </style>
 </head>
 <body>
@@ -95,6 +98,8 @@ function renderPlayers(users){
   users.forEach(u => {
     const row = document.createElement('div');
     row.className = 'row list-item clickable';
+    if(u.role==='moderator') row.classList.add('moderator');
+    if(u.role==='elder') row.classList.add('elder');
     row.innerHTML = `<div>${u.rank}</div><div>${u.nick ?? 'Без ника'}</div><div>${u.points}</div>`;
 
     row.onclick = ()=>{
@@ -104,14 +109,24 @@ function renderPlayers(users){
         return;
       }
 
-      let html = '<div class="row small"><div>#</div><div>Уровень</div><div>Очки</div></div>';
+      let html = `
+        <p><b>Ник:</b> ${u.nick ?? 'Без ника'}</p>
+        <p><b>Почта:</b> ${u.email ?? '—'}</p>
+        <p><b>Роль:</b> ${u.role ?? 'player'}</p>
+        <p><b>Статус:</b> ${u.situation ?? '—'}</p>
+        <p><b>Очки:</b> ${Number(u.points ?? 0)}</p>
+        <p><b>Место в топе:</b> ${u.rank}</p>
+        <p><b>Подтвержденных прохождений:</b> ${mine.length}</p>
+        <table class="modal-table"><thead><tr><th>#</th><th>Уровень</th><th>Очки</th></tr></thead><tbody>
+      `;
       mine
         .sort((a,b)=>(a.reviewedAt?.seconds ?? 0) - (b.reviewedAt?.seconds ?? 0))
         .forEach((c, idx)=>{
           const level = c.levelId ? levelsById.get(c.levelId) : null;
           const levelName = level?.text ?? c.text ?? 'Уровень';
-          html += `<div class="row list-item"><div>${idx+1}</div><div>${levelName}</div><div>${Number(c.awardedPoints ?? 0)}</div></div>`;
+          html += `<tr><td>${idx+1}</td><td>${levelName}</td><td>${Number(c.awardedPoints ?? 0)}</td></tr>`;
         });
+      html += '</tbody></table>';
       openModal(`Игрок: ${u.nick ?? 'Без ника'}`, html);
     };
 
@@ -144,10 +159,11 @@ function renderLevels(levels){
         return;
       }
 
-      let html = '<div class="row small"><div>#</div><div>Игрок</div><div>Очки</div></div>';
+      let html = '<table class="modal-table"><thead><tr><th>#</th><th>Игрок</th><th>Очки</th></tr></thead><tbody>';
       passed.forEach((c, idx)=>{
-        html += `<div class="row list-item"><div>${idx+1}</div><div>${c.nick ?? 'Без ника'}</div><div>${Number(c.awardedPoints ?? 0)}</div></div>`;
+        html += `<tr><td>${idx+1}</td><td>${c.nick ?? 'Без ника'}</td><td>${Number(c.awardedPoints ?? 0)}</td></tr>`;
       });
+      html += '</tbody></table>';
       openModal(`Уровень #${l.rank ?? '—'}`, html);
     };
 
