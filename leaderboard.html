@@ -82,6 +82,8 @@ function toggleView(){
   levelsPanel.classList.toggle('active', showLevels);
   toggleBtn.textContent = showLevels ? 'Показать топ игроков' : 'Показать лист уровней';
 }
+function esc(v){ return String(v ?? '').replace(/[&<>'"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;' }[c])); }
+function safeUrl(v){ try { const u = new URL((v ?? '').trim()); return (u.protocol==='http:' || u.protocol==='https:') ? u.toString() : ''; } catch { return ''; } }
 
 toggleBtn.onclick = toggleView;
 
@@ -157,6 +159,72 @@ function openPlayer(u){
     infoBody.append(text('p', 'Пока нет прохождений.'));
     return;
   }
+  document.getElementById('infoBody').innerHTML = lines.join('');
+  infoModal.classList.add('open');
+}
+
+function openLevelInfo(level){
+  document.getElementById('infoTitle').textContent = `Уровень #${level.rank ?? '—'}`;
+  const passed = approvedComps.filter(c=> (c.levelId && c.levelId===level.id) || (!c.levelId && Number(c.listRank)===Number(level.rank)) );
+  const rows = [];
+  const link = safeUrl(level.link);
+  rows.push(`<p><b>Название/описание:</b> ${esc(level.text ?? '—')}</p>`);
+  rows.push(`<p><b>Место:</b> ${Number(level.rank ?? 0) || '—'}</p>`);
+  rows.push(`<p><b>Ссылка:</b> ${link ? `<a href="${link}" target="_blank">Открыть</a>` : '—'}</p>`);
+  rows.push('<h3>Игроки, прошедшие уровень</h3>');
+  if(!passed.length) rows.push('<p>Пока никто не прошел.</p>');
+  else passed.forEach(c=>rows.push(`<div class="row"><div>${esc(c.nick ?? 'Без ника')}</div><div></div><div>${Number(c.awardedPoints ?? 0)}</div></div>`));
+  document.getElementById('infoBody').innerHTML = rows.join('');
+  infoModal.classList.add('open');
+}
+
+playerSearch.oninput = renderPlayers;
+
+async function loadAll(){
+  const [usersSnap, levelsSnap, compsSnap, scoringSnap] = await Promise.all([
+    getDocs(query(collection(db,'users'), orderBy('points','desc'))),
+    getDocs(query(collection(db,'levels'), orderBy('rank','asc'))),
+    getDocs(query(collection(db,'completion_submissions'), where('status','==','approved'))),
+    getDoc(doc(db,'settings','scoring'))
+  ]);
+
+  users = [];
+  usersSnap.forEach(d=>{ const u=d.data(); if(u.situation==='verified') users.push({id:d.id, ...u}); });
+  levels = [];
+  levelsSnap.forEach(d=>{ const l=d.data(); if(l.status!=='archived') levels.push({id:d.id, ...l}); });
+  approvedComps = [];
+  compsSnap.forEach(d=>approvedComps.push({id:d.id, ...d.data()}));
+
+  const s = scoringSnap.exists() ? scoringSnap.data() : {};
+  scoring = {
+    maximumPoints: Number(s.maximumPoints ?? s.maxPoints ?? 100),
+    rankDecayFactor: Number(s.rankDecayFactor ?? s.decayA ?? 3),
+    repeatPenaltyPower: Number(s.repeatPenaltyPower ?? s.grindPower ?? 0.5)
+  };
+
+  renderPlayers();
+  renderLevels();
+}
+
+onAuthStateChanged(auth, async user=>{
+  if(!user) return location.href='index.html';
+  try {
+    const meSnap = await getDoc(doc(db,'users',user.uid));
+    const me = meSnap.exists() ? meSnap.data() : null;
+    if(!me || me.situation!=='verified') return location.href='nick.html';
+
+  passed.forEach(c => {
+    const lv = c.levelId ? levels.find(x => x.id === c.levelId) : levels.find(x => Number(x.rank) === Number(c.listRank));
+    const row = document.createElement('div');
+    row.className = 'row list-item';
+    row.append(
+      text('div', `#${Number(c.listRank ?? 0) || '—'}`),
+      text('div', lv?.text ?? c.text ?? 'Уровень'),
+      text('div', String(Number(c.awardedPoints ?? 0)))
+    );
+    infoBody.appendChild(row);
+  });
+}
 
   passed.forEach(c => {
     const lv = c.levelId ? levels.find(x => x.id === c.levelId) : levels.find(x => Number(x.rank) === Number(c.listRank));
