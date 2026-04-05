@@ -2,14 +2,11 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>Moderator Panel</title>
+<title>Панель модератора</title>
 <link rel="stylesheet" href="hud.css">
-<style>
-  .row{border:1px solid #2d8cff55;background:rgba(0,20,50,.35);padding:12px;border-radius:10px;margin-bottom:12px}
-</style>
 </head>
 <body>
-<div class="hud" style="max-width:980px;margin:40px auto;">
+<div class="hud" style="max-width:1020px;margin:40px auto;">
   <div class="page-header">
     <h1 style="margin:0;">Панель модератора</h1>
     <button id="backMain" class="btn-ghost">На главную</button>
@@ -17,72 +14,76 @@
   <p id="status" style="color:#00ffff;">Загрузка...</p>
 
   <div class="top-actions">
-    <button id="goLevelsModeration" class="btn-hero">Меню уровней модератора</button>
+    <button id="goModLevels" class="btn-hero">Меню уровней модератора</button>
   </div>
 
-  <h2>Верифицированные игроки (без модераторов)</h2>
+  <h2>Верифицированные игроки</h2>
+  <p class="small">Здесь можно быстро корректировать очки обычных игроков (без ролей модерации).</p>
   <div id="players"></div>
 </div>
 
 <script type="module">
 import { auth, db } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import { collection, query, where, getDocs, doc, getDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+import { collection, doc, getDoc, getDocs, query, updateDoc, where } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
 const statusEl = document.getElementById('status');
-const playersBox = document.getElementById('players');
-
+const playersEl = document.getElementById('players');
 document.getElementById('backMain').onclick = ()=> location.href='main.html';
-document.getElementById('goLevelsModeration').onclick = ()=> location.href='moderator-levels.html';
+document.getElementById('goModLevels').onclick = ()=> location.href='moderator-levels.html';
 
-async function loadPlayers(){
-  playersBox.innerHTML = 'Загрузка игроков...';
+async function renderPlayers(){
+  playersEl.innerHTML = 'Загрузка игроков...';
   const snap = await getDocs(query(collection(db,'users'), where('situation','==','verified')));
-  const items = [];
-  snap.forEach(d=>{
+  const users = [];
+  snap.forEach(d => {
     const u = d.data();
-    if(u.role==='moderator' || u.role==='elder') return;
-    items.push({id:d.id, ...u});
+    if(u.role === 'moderator' || u.role === 'elder') return;
+    users.push({ id:d.id, ...u });
   });
+  users.sort((a,b) => String(a.nick ?? '').localeCompare(String(b.nick ?? ''), 'ru'));
 
-  items.sort((a,b)=> String(a.nick ?? '').localeCompare(String(b.nick ?? ''), 'ru'));
-  if(!items.length){ playersBox.innerHTML = '<p>Подходящих игроков нет.</p>'; return; }
+  playersEl.innerHTML = '';
+  if(!users.length){ playersEl.innerHTML = '<p>Нет подходящих игроков.</p>'; return; }
 
-  playersBox.innerHTML = '';
-  items.forEach(u=>{
+  users.forEach(u => {
     const row = document.createElement('div');
-    row.className='row';
-    row.innerHTML = `
-      <b>${u.nick ?? 'Без ника'}</b>
-      <p class="small">${u.email ?? '—'}</p>
-      <input type="number" class="points" value="${Number(u.points ?? 0)}" placeholder="Очки">
-      <button class="savePoints">Сохранить очки</button>
-    `;
-    playersBox.appendChild(row);
+    row.className = 'list-item';
 
-    row.querySelector('.savePoints').onclick = async ()=>{
-      const points = Number(row.querySelector('.points').value);
-      if(Number.isNaN(points)){ alert('Некорректные очки'); return; }
-      await updateDoc(doc(db,'users',u.id), { points });
-      row.style.outline = '1px solid rgba(32,245,204,.7)';
+    const nick = document.createElement('b');
+    nick.textContent = u.nick ?? 'Без ника';
+    const email = document.createElement('p');
+    email.className = 'small';
+    email.textContent = u.email ?? '—';
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.value = String(Number(u.points ?? 0));
+    const save = document.createElement('button');
+    save.textContent = 'Сохранить очки';
+
+    save.onclick = async ()=>{
+      const value = Number(input.value);
+      if(Number.isNaN(value)){ alert('Некорректное число'); return; }
+      save.disabled = true;
+      await updateDoc(doc(db,'users',u.id), { points:value });
+      save.textContent = 'Сохранено';
+      setTimeout(()=>{ save.textContent = 'Сохранить очки'; save.disabled = false; }, 700);
     };
+
+    row.append(nick, email, input, save);
+    playersEl.appendChild(row);
   });
 }
 
 onAuthStateChanged(auth, async user => {
   if(!user) return location.href='index.html';
-  try {
-    const meSnap = await getDoc(doc(db,'users',user.uid));
-    const me = meSnap.exists() ? meSnap.data() : null;
-    if(!me || me.situation!=='verified') return location.href='nick.html';
-    if(me.role!=='moderator' && me.role!=='elder') return location.href='main.html';
+  const meSnap = await getDoc(doc(db,'users',user.uid));
+  const me = meSnap.exists() ? meSnap.data() : null;
+  if(!me || me.situation !== 'verified') return location.href='nick.html';
+  if(me.role !== 'moderator' && me.role !== 'elder') return location.href='main.html';
 
-    await loadPlayers();
-    statusEl.textContent = '';
-  } catch (e) {
-    console.error(e);
-    statusEl.textContent = 'Не удалось загрузить панель модерации.';
-  }
+  await renderPlayers();
+  statusEl.textContent = '';
 });
 </script>
 </body>

@@ -2,19 +2,15 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>Старший модератор</title>
+<title>Панель старшего модератора</title>
 <link rel="stylesheet" href="hud.css">
 <style>
-  .user-card{cursor:pointer}
-  .user-card:hover{outline:1px solid rgba(32,245,204,.7)}
-  .unverified{color:#8c97a8;opacity:.65}
   .modal-section{display:none}
   .modal-section.active{display:block}
-  .users-head{opacity:.7;font-size:12px}
 </style>
 </head>
 <body>
-<div class="hud" style="max-width:1100px;margin:40px auto;">
+<div class="hud" style="max-width:1120px;margin:36px auto;">
   <div class="page-header">
     <h1 style="margin:0;">Панель старшего модератора</h1>
     <button id="backMain" class="btn-ghost">На главную</button>
@@ -26,15 +22,15 @@
   </div>
 
   <h2>Игроки</h2>
-  <div class="row users-head"><div>ID</div><div>Ник</div><div>Очки</div></div>
+  <div class="row small"><div>#</div><div>Ник</div><div>Очки</div></div>
   <div id="users"></div>
 </div>
 
 <div id="playerModal" class="dialog-backdrop">
   <div class="dialog" style="width:min(980px,95vw)">
     <div class="page-header">
-      <h2 id="playerModalTitle" style="margin:0;">Игрок</h2>
-      <button id="closePlayerModal" class="btn-ghost">Закрыть</button>
+      <h2 id="playerTitle" style="margin:0;">Игрок</h2>
+      <button id="closeModal" class="btn-ghost">Закрыть</button>
     </div>
 
     <div id="profileSection" class="modal-section active"></div>
@@ -45,272 +41,228 @@
 <script type="module">
 import { auth, db } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import { collection, query, orderBy, where, getDocs, doc, updateDoc, getDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+import { collection, deleteDoc, doc, getDoc, getDocs, orderBy, query, updateDoc, where } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
 const statusEl = document.getElementById('status');
 const usersEl = document.getElementById('users');
 const modal = document.getElementById('playerModal');
 const profileSection = document.getElementById('profileSection');
 const submissionsSection = document.getElementById('submissionsSection');
-let openedPlayer = null;
-let openedSubmissions = [];
+
+let current = null;
+let submissions = [];
 
 document.getElementById('backMain').onclick = ()=> location.href='main.html';
 document.getElementById('goElderLevels').onclick = ()=> location.href='elder-levels.html';
-document.getElementById('closePlayerModal').onclick = ()=> modal.classList.remove('open');
+document.getElementById('closeModal').onclick = ()=> modal.classList.remove('open');
 
-function switchModalSection(name){
-  profileSection.classList.toggle('active', name==='profile');
-  submissionsSection.classList.toggle('active', name==='submissions');
+function section(name){
+  profileSection.classList.toggle('active', name === 'profile');
+  submissionsSection.classList.toggle('active', name === 'submissions');
 }
 
-async function clearUserHistory(userId){
-  const [levelSubs, compSubs, appeals] = await Promise.all([
+async function clearHistory(userId){
+  const [a,b,c] = await Promise.all([
     getDocs(query(collection(db,'level_submissions'), where('authorId','==',userId))),
     getDocs(query(collection(db,'completion_submissions'), where('playerId','==',userId))),
     getDocs(query(collection(db,'appeals'), where('playerId','==',userId)))
   ]);
-
-  for (const d of levelSubs.docs) await deleteDoc(doc(db,'level_submissions',d.id));
-  for (const d of compSubs.docs) await deleteDoc(doc(db,'completion_submissions',d.id));
-  for (const d of appeals.docs) await deleteDoc(doc(db,'appeals',d.id));
+  for(const d of a.docs) await deleteDoc(doc(db,'level_submissions',d.id));
+  for(const d of b.docs) await deleteDoc(doc(db,'completion_submissions',d.id));
+  for(const d of c.docs) await deleteDoc(doc(db,'appeals',d.id));
 }
 
-function fieldLabel(text){
-  const x = document.createElement('label');
-  x.className = 'small';
-  x.textContent = text;
-  return x;
-}
-
-function makeInput(type='text'){
-  const x = document.createElement('input');
-  x.type = type;
-  return x;
-}
-
-async function loadPlayerSubmissions(userId){
-  const [levelSubs, compSubs, appealSubs] = await Promise.all([
+async function loadSubmissions(userId){
+  const [a,b,c] = await Promise.all([
     getDocs(query(collection(db,'level_submissions'), where('authorId','==',userId))),
     getDocs(query(collection(db,'completion_submissions'), where('playerId','==',userId))),
     getDocs(query(collection(db,'appeals'), where('playerId','==',userId)))
   ]);
-
   const all = [];
-  levelSubs.forEach(d=>all.push({type:'level', ...d.data()}));
-  compSubs.forEach(d=>all.push({type:'completion', ...d.data()}));
-  appealSubs.forEach(d=>all.push({type:'appeal', ...d.data()}));
+  a.forEach(d => all.push({ type:'level', ...d.data() }));
+  b.forEach(d => all.push({ type:'completion', ...d.data() }));
+  c.forEach(d => all.push({ type:'appeal', ...d.data() }));
   return all;
 }
 
-function renderSubmissionsList(searchInput, typeSelect, statusSelect, listEl){
-  const q = searchInput.value.trim().toLowerCase();
-  const type = typeSelect.value;
-  const status = statusSelect.value;
-  listEl.innerHTML = '';
+function input(label, type = 'text'){
+  const l = document.createElement('label');
+  l.className = 'small';
+  l.textContent = label;
+  const i = document.createElement('input');
+  i.type = type;
+  return { label:l, input:i };
+}
 
-  const filtered = openedSubmissions.filter(x=>{
-    if(type !== 'all' && x.type !== type) return false;
-    if(status !== 'all' && x.status !== status) return false;
-    const hay = `${x.levelName ?? ''} ${x.nick ?? ''} ${x.text ?? ''} ${x.status ?? ''}`.toLowerCase();
+function renderSubmissions(){
+  const q = document.getElementById('sSearch').value.trim().toLowerCase();
+  const type = document.getElementById('sType').value;
+  const state = document.getElementById('sState').value;
+  const box = document.getElementById('sList');
+  box.innerHTML = '';
+
+  const filtered = submissions.filter(s => {
+    if(type !== 'all' && s.type !== type) return false;
+    if(state !== 'all' && s.status !== state) return false;
+    const hay = `${s.nick ?? ''} ${s.text ?? ''} ${s.status ?? ''} ${s.levelName ?? ''}`.toLowerCase();
     return !q || hay.includes(q);
   });
 
-  if(!filtered.length){
-    listEl.innerHTML = '<p>Отправки не найдены.</p>';
-    return;
-  }
+  if(!filtered.length){ box.innerHTML = '<p>Отправки не найдены.</p>'; return; }
 
-  filtered.forEach((x, idx)=>{
+  filtered.forEach((s, idx) => {
     const row = document.createElement('div');
-    row.className = 'row';
-    const col1 = document.createElement('div');
-    col1.textContent = String(idx + 1);
-    const col2 = document.createElement('div');
-    col2.textContent = `[${x.type}] ${x.levelName ?? x.text ?? 'Без текста'}`;
-    const col3 = document.createElement('div');
-    col3.textContent = x.status ?? '—';
-    row.append(col1, col2, col3);
-    listEl.appendChild(row);
+    row.className = 'row list-item';
+    row.append(
+      Object.assign(document.createElement('div'), { textContent:String(idx + 1) }),
+      Object.assign(document.createElement('div'), { textContent:`[${s.type}] ${s.levelName ?? s.text ?? 'Без текста'}` }),
+      Object.assign(document.createElement('div'), { textContent:s.status ?? '—' })
+    );
+    box.appendChild(row);
   });
 }
 
-async function openPlayerModal(userDoc){
-  const { id, data } = userDoc;
-  openedPlayer = { id, data: { ...data } };
-
-  document.getElementById('playerModalTitle').textContent = openedPlayer.data.nick || 'Игрок';
+async function openPlayer(user){
+  current = { ...user };
+  document.getElementById('playerTitle').textContent = current.nick ?? 'Игрок';
   profileSection.innerHTML = '';
   submissionsSection.innerHTML = '';
 
-  const nickInput = makeInput('text');
-  nickInput.value = openedPlayer.data.nick ?? '';
-  nickInput.placeholder = 'Ник';
+  const nick = input('Ник');
+  nick.input.value = current.nick ?? '';
+  const email = input('Почта');
+  email.input.value = current.email ?? '';
+  email.input.readOnly = true;
+  const points = input('Очки', 'number');
+  points.input.value = String(Number(current.points ?? 0));
 
-  const emailInput = makeInput('text');
-  emailInput.value = openedPlayer.data.email ?? '';
-  emailInput.readOnly = true;
-
-  const pointsInput = makeInput('number');
-  pointsInput.value = String(Number(openedPlayer.data.points ?? 0));
-  pointsInput.placeholder = 'Очки';
-
-  const roleSelect = document.createElement('select');
-  ['player', 'moderator', 'elder'].forEach(role=>{
+  const roleLabel = document.createElement('label');
+  roleLabel.className = 'small';
+  roleLabel.textContent = 'Роль';
+  const role = document.createElement('select');
+  ['player','moderator','elder'].forEach(r => {
     const option = document.createElement('option');
-    option.value = role;
-    option.textContent = role;
-    if((openedPlayer.data.role ?? 'player') === role) option.selected = true;
-    roleSelect.appendChild(option);
+    option.value = r;
+    option.textContent = r;
+    if((current.role ?? 'player') === r) option.selected = true;
+    role.appendChild(option);
   });
 
   const actions = document.createElement('div');
   actions.className = 'top-actions';
+  const verify = document.createElement('button');
+  verify.textContent = current.situation === 'verified' ? 'Снять верификацию' : 'Верифицировать';
+  const openSub = document.createElement('button');
+  openSub.textContent = 'Отправки';
+  const clear = document.createElement('button');
+  clear.className = 'btn-danger';
+  clear.textContent = 'Очистить историю';
+  actions.append(verify, openSub, clear);
 
-  const verifyBtn = document.createElement('button');
-  verifyBtn.textContent = openedPlayer.data.situation === 'verified' ? 'Снять верифку' : 'Верифицировать';
-  const openSubsBtn = document.createElement('button');
-  openSubsBtn.textContent = 'Отправки';
-  const clearHistoryBtn = document.createElement('button');
-  clearHistoryBtn.className = 'btn-danger';
-  clearHistoryBtn.textContent = 'Очистить историю отправок';
+  profileSection.append(nick.label, nick.input, email.label, email.input, points.label, points.input, roleLabel, role, actions);
 
-  actions.append(verifyBtn, openSubsBtn, clearHistoryBtn);
-  profileSection.append(
-    fieldLabel('Ник'), nickInput,
-    fieldLabel('Почта'), emailInput,
-    fieldLabel('Очки'), pointsInput,
-    fieldLabel('Роль'), roleSelect,
-    actions
-  );
-
-  nickInput.onchange = async ()=>{
-    const next = nickInput.value.trim();
-    await updateDoc(doc(db,'users',id), { nick: next });
-    openedPlayer.data.nick = next;
-    document.getElementById('playerModalTitle').textContent = next || 'Игрок';
-    await loadUsers();
+  nick.input.onchange = async ()=>{
+    const value = nick.input.value.trim();
+    await updateDoc(doc(db,'users',current.id), { nick:value });
+    current.nick = value;
+    document.getElementById('playerTitle').textContent = value || 'Игрок';
+    await renderUsers();
+  };
+  points.input.onchange = async ()=>{
+    const value = Number(points.input.value || 0);
+    await updateDoc(doc(db,'users',current.id), { points:value });
+    current.points = value;
+    await renderUsers();
+  };
+  role.onchange = async ()=>{
+    await updateDoc(doc(db,'users',current.id), { role:role.value });
+    current.role = role.value;
+    await renderUsers();
+  };
+  verify.onclick = async ()=>{
+    const next = current.situation === 'verified' ? 'not requested' : 'verified';
+    await updateDoc(doc(db,'users',current.id), { situation:next });
+    current.situation = next;
+    verify.textContent = next === 'verified' ? 'Снять верификацию' : 'Верифицировать';
+    await renderUsers();
+  };
+  clear.onclick = async ()=>{
+    if(!confirm('Удалить все отправки игрока?')) return;
+    await clearHistory(current.id);
+    submissions = [];
+    alert('История очищена.');
   };
 
-  pointsInput.onchange = async ()=>{
-    const next = Number(pointsInput.value || 0);
-    await updateDoc(doc(db,'users',id), { points: next });
-    openedPlayer.data.points = next;
-    await loadUsers();
-  };
-
-  roleSelect.onchange = async ()=>{
-    await updateDoc(doc(db,'users',id), { role: roleSelect.value });
-    openedPlayer.data.role = roleSelect.value;
-    await loadUsers();
-  };
-
-  verifyBtn.onclick = async ()=>{
-    const next = openedPlayer.data.situation === 'verified' ? 'not requested' : 'verified';
-    await updateDoc(doc(db,'users',id), { situation: next });
-    openedPlayer.data.situation = next;
-    verifyBtn.textContent = next === 'verified' ? 'Снять верифку' : 'Верифицировать';
-    await loadUsers();
-  };
-
-  clearHistoryBtn.onclick = async ()=>{
-    if(!confirm('Удалить всю историю отправок этого игрока?')) return;
-    await clearUserHistory(id);
-    openedSubmissions = [];
-    alert('История очищена');
-  };
-
-  const topActions = document.createElement('div');
-  topActions.className = 'top-actions';
-  const backProfileBtn = document.createElement('button');
-  backProfileBtn.className = 'btn-ghost';
-  backProfileBtn.textContent = 'Назад к профилю';
-  topActions.appendChild(backProfileBtn);
-
-  const toolbar = document.createElement('div');
-  toolbar.className = 'toolbar';
-  const subSearch = makeInput('text');
-  subSearch.placeholder = 'Поиск отправок';
-  const subType = document.createElement('select');
-  subType.innerHTML = `
-    <option value="all">Все типы</option>
-    <option value="level">Уровни</option>
-    <option value="completion">Прохождения</option>
-    <option value="appeal">Апелляции</option>
+  submissionsSection.innerHTML = `
+    <div class="top-actions"><button id="backProfile" class="btn-ghost">Назад к профилю</button></div>
+    <div class="toolbar">
+      <input id="sSearch" placeholder="Поиск отправок">
+      <select id="sType">
+        <option value="all">Все типы</option>
+        <option value="level">Уровни</option>
+        <option value="completion">Прохождения</option>
+        <option value="appeal">Апелляции</option>
+      </select>
+      <select id="sState">
+        <option value="all">Все статусы</option>
+        <option value="approved">Только успешные</option>
+        <option value="pending">Ожидают</option>
+        <option value="rejected">Отклонённые</option>
+      </select>
+    </div>
+    <div id="sList"></div>
   `;
-  const subStatus = document.createElement('select');
-  subStatus.innerHTML = `
-    <option value="all">Все статусы</option>
-    <option value="approved">Только успешные</option>
-    <option value="pending">Ожидают</option>
-    <option value="rejected">Отклонённые</option>
-  `;
-  toolbar.append(subSearch, subType, subStatus);
+  document.getElementById('backProfile').onclick = ()=> section('profile');
+  document.getElementById('sSearch').oninput = renderSubmissions;
+  document.getElementById('sType').onchange = renderSubmissions;
+  document.getElementById('sState').onchange = renderSubmissions;
 
-  const subList = document.createElement('div');
-  submissionsSection.append(topActions, toolbar, subList);
-
-  backProfileBtn.onclick = ()=>switchModalSection('profile');
-  subSearch.oninput = ()=>renderSubmissionsList(subSearch, subType, subStatus, subList);
-  subType.onchange = ()=>renderSubmissionsList(subSearch, subType, subStatus, subList);
-  subStatus.onchange = ()=>renderSubmissionsList(subSearch, subType, subStatus, subList);
-
-  openSubsBtn.onclick = async ()=>{
-    openSubsBtn.disabled = true;
-    try {
-      openedSubmissions = await loadPlayerSubmissions(id);
-      renderSubmissionsList(subSearch, subType, subStatus, subList);
-      switchModalSection('submissions');
-    } finally {
-      openSubsBtn.disabled = false;
-    }
+  openSub.onclick = async ()=>{
+    openSub.disabled = true;
+    submissions = await loadSubmissions(current.id);
+    renderSubmissions();
+    section('submissions');
+    openSub.disabled = false;
   };
 
-  switchModalSection('profile');
+  section('profile');
   modal.classList.add('open');
 }
 
-async function loadUsers(){
-  usersEl.innerHTML = 'Загрузка...';
+async function renderUsers(){
+  usersEl.innerHTML = 'Загрузка игроков...';
   const snap = await getDocs(query(collection(db,'users'), orderBy('points','desc')));
-  if(snap.empty){ usersEl.innerHTML = '<p>Нет пользователей.</p>'; return; }
-
   usersEl.innerHTML = '';
-  let pos = 1;
-  snap.forEach(d=>{
+
+  let i = 1;
+  snap.forEach(d => {
     const u = d.data();
     const row = document.createElement('div');
-    row.className = 'row user-card';
-    if(u.role==='moderator') row.classList.add('moderator');
-    if(u.role==='elder') row.classList.add('elder');
-    if(u.situation!=='verified') row.classList.add('unverified');
-    const c1 = document.createElement('div');
-    c1.textContent = String(pos++);
-    const c2 = document.createElement('div');
-    c2.textContent = u.nick ?? 'Без ника';
-    const c3 = document.createElement('div');
-    c3.textContent = String(Number(u.points ?? 0));
-    row.append(c1, c2, c3);
-    row.onclick = ()=>openPlayerModal({id:d.id, data:u});
+    row.className = 'row list-item clickable';
+    if(u.role === 'moderator') row.classList.add('moderator');
+    if(u.role === 'elder') row.classList.add('elder');
+    if(u.situation !== 'verified') row.classList.add('unverified');
+
+    row.append(
+      Object.assign(document.createElement('div'), { textContent:String(i++) }),
+      Object.assign(document.createElement('div'), { textContent:u.nick ?? 'Без ника' }),
+      Object.assign(document.createElement('div'), { textContent:String(Number(u.points ?? 0)) })
+    );
+
+    row.onclick = ()=> openPlayer({ id:d.id, ...u });
     usersEl.appendChild(row);
   });
 }
 
-onAuthStateChanged(auth, async user=>{
+onAuthStateChanged(auth, async user => {
   if(!user) return location.href='index.html';
-  try {
-    const meSnap = await getDoc(doc(db,'users',user.uid));
-    const me = meSnap.exists() ? meSnap.data() : null;
-    if(!me || me.situation!=='verified') return location.href='nick.html';
-    if(me.role!=='elder') return location.href='main.html';
-    meUid = user.uid;
+  const meSnap = await getDoc(doc(db,'users',user.uid));
+  const me = meSnap.exists() ? meSnap.data() : null;
+  if(!me || me.situation !== 'verified') return location.href='nick.html';
+  if(me.role !== 'elder') return location.href='main.html';
 
-    await loadUsers();
-    statusEl.textContent = '';
-  } catch (e) {
-    console.error(e);
-    statusEl.textContent = 'Не удалось загрузить панель старшего модератора.';
-  }
+  await renderUsers();
+  statusEl.textContent = '';
 });
 </script>
 </body>

@@ -2,78 +2,88 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>Main</title>
+<title>Главная</title>
 <link rel="stylesheet" href="hud.css">
 </head>
 <body>
-<div class="hud" style="max-width:800px;margin:50px auto;text-align:center;">
+<div class="hud" style="max-width:860px;margin:48px auto;text-align:center;">
   <div class="page-header" style="justify-content:center;">
-    <h1 style="margin:0;">Главная страница</h1>
+    <h1 style="margin:0;">Главная панель</h1>
   </div>
   <p id="status" style="color:#00ffff;">Загрузка профиля...</p>
-  <p id="userInfo"></p>
-  <p id="userPoints"></p>
-  <p id="userPlace"></p>
 
-  <div class="top-actions" style="justify-content:center;">
-    <button id="leaderboardBtn" class="btn-hero">Лидерборд и лист</button>
-    <button id="openLevelsMenu" class="btn-hero">Меню уровней</button>
-    <button id="check" class="btn-hero">Проверить</button>
+  <div class="stats-grid" style="margin:14px 0;">
+    <div class="stat"><div class="small">Ник</div><div id="nick">—</div></div>
+    <div class="stat"><div class="small">Очки</div><div id="points">0</div></div>
+    <div class="stat"><div class="small">Место</div><div id="place">—</div></div>
+    <div class="stat"><div class="small">Роль</div><div id="role">player</div></div>
   </div>
 
-  <p id="err" style="color:red;margin-top:12px;"></p>
-  <p id="version" class="small" style="margin-top:22px;opacity:.72;"></p>
+  <div class="top-actions" style="justify-content:center;">
+    <button id="goBoard" class="btn-hero">Лидерборд и лист</button>
+    <button id="goLevels" class="btn-hero">Меню уровней</button>
+    <button id="goModeration" class="btn-hero">Панель модерации</button>
+  </div>
+
+  <p id="warn" style="color:#ff8fa8;"></p>
+  <p class="small" id="version" style="margin-top:18px;"></p>
 </div>
 
 <script type="module">
 import { auth, db } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import { doc, getDoc, collection, getDocs, query, orderBy } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+import { collection, doc, getDoc, getDocs, orderBy, query } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+
+const APP_VERSION = 'V3 UI rebuild · 2026-04-05';
+document.getElementById('version').textContent = `Версия: ${APP_VERSION}`;
 
 const statusEl = document.getElementById('status');
-const info = document.getElementById('userInfo');
-const pointsEl = document.getElementById('userPoints');
-const placeEl = document.getElementById('userPlace');
-const err = document.getElementById('err');
-const versionEl = document.getElementById('version');
-const APP_VERSION = 'save full - 001 · v2026.04.04';
-versionEl.textContent = `Версия: ${APP_VERSION}`;
+const nickEl = document.getElementById('nick');
+const pointsEl = document.getElementById('points');
+const placeEl = document.getElementById('place');
+const roleEl = document.getElementById('role');
+const warnEl = document.getElementById('warn');
+
+function routeByRole(role){
+  if(role === 'elder') return 'elder.html';
+  if(role === 'moderator') return 'moderator.html';
+  return '';
+}
 
 onAuthStateChanged(auth, async user => {
-  if(!user) return location.href='index.html';
+  if(!user) return location.href = 'index.html';
 
-  try {
-    const userSnap = await getDoc(doc(db,'users',user.uid));
-    const profile = userSnap.exists() ? userSnap.data() : null;
-    if(!profile || profile.situation !== 'verified') return location.href='nick.html';
+  const meSnap = await getDoc(doc(db, 'users', user.uid));
+  const me = meSnap.exists() ? meSnap.data() : null;
+  if(!me || me.situation !== 'verified') return location.href = 'nick.html';
 
-    statusEl.textContent = '';
-    info.textContent = `Ник: ${profile.nick ?? '—'}`;
-    pointsEl.textContent = `Баллы: ${profile.points ?? 0}`;
+  nickEl.textContent = me.nick ?? 'Без ника';
+  pointsEl.textContent = String(Number(me.points ?? 0));
+  roleEl.textContent = me.role ?? 'player';
 
-    const usersSnap = await getDocs(query(collection(db,'users'), orderBy('points','desc')));
-    let place = 0, rank = 0, last = null;
-    usersSnap.forEach(d=>{
-      const u = d.data();
-      if(u.situation!=='verified') return;
-      rank++;
-      if(u.points !== last){ place = rank; last = u.points; }
-      if(d.id===user.uid) placeEl.textContent = `Место: ${place}`;
-    });
-    if(!placeEl.textContent) placeEl.textContent='Место: —';
+  const usersSnap = await getDocs(query(collection(db,'users'), orderBy('points','desc')));
+  let i = 0;
+  let rank = 0;
+  let place = '—';
+  let last = null;
+  usersSnap.forEach(d => {
+    const u = d.data();
+    if(u.situation !== 'verified') return;
+    i++;
+    if(u.points !== last){ rank = i; last = u.points; }
+    if(d.id === user.uid) place = String(rank);
+  });
+  placeEl.textContent = place;
 
-    document.getElementById('leaderboardBtn').onclick = ()=> location.href='leaderboard.html';
-    document.getElementById('openLevelsMenu').onclick = ()=> location.href='levels-menu.html';
-    document.getElementById('check').onclick = ()=>{
-      if(profile.role==='moderator') location.href='moderator.html';
-      else if(profile.role==='elder') location.href='elder.html';
-      else err.textContent='модерки нет';
-    };
+  document.getElementById('goBoard').onclick = () => location.href = 'leaderboard.html';
+  document.getElementById('goLevels').onclick = () => location.href = 'levels-menu.html';
+  document.getElementById('goModeration').onclick = () => {
+    const to = routeByRole(me.role);
+    if(!to){ warnEl.textContent = 'У тебя нет роли модератора.'; return; }
+    location.href = to;
+  };
 
-  } catch (e) {
-    console.error(e);
-    statusEl.textContent = 'Не удалось загрузить профиль.';
-  }
+  statusEl.textContent = '';
 });
 </script>
 </body>
