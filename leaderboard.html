@@ -54,7 +54,6 @@ import { auth, db } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
 import { collection, query, orderBy, getDocs, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
-const statusEl = document.getElementById('status');
 const playersList = document.getElementById('playersList');
 const levelsList = document.getElementById('levelsList');
 const playerSearch = document.getElementById('playerSearch');
@@ -119,6 +118,9 @@ function renderPlayers(){
     row.innerHTML = `<div>${rank}</div><div>${escapeHtml(u.nick ?? 'Без ника')}</div><div>${Number(u.points ?? 0)}</div>`;
     playersList.appendChild(row);
   });
+  statPlayers.textContent = String(usersCache.length);
+  renderPlayers();
+}
 
   if(!playersList.childElementCount) playersList.innerHTML = '<p>Игроки не найдены.</p>';
 }
