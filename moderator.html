@@ -39,7 +39,6 @@
         <button id="toggleView" class="toolbar-btn btn-hero">Меню листа</button>
         <button id="openSubmissions" class="toolbar-btn btn-success">Отправки</button>
         <button id="openAddLevel" class="toolbar-btn">Добавить</button>
-        <button id="openSendMenu" class="toolbar-btn btn-ghost">Отправить</button>
       </div>
     </aside>
   </div>
@@ -126,7 +125,6 @@ document.getElementById('openSubmissions').onclick = async ()=>{
   renderPendingSubmissions();
   submissionsModal.classList.add('open');
 };
-document.getElementById('openSendMenu').onclick = ()=> location.href='levels-menu.html';
 document.getElementById('openAddLevel').onclick = ()=>{
   document.getElementById('addLevelMsg').textContent = '';
   addLevelModal.classList.add('open');

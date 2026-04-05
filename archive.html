@@ -45,7 +45,11 @@ const statusEl = document.getElementById('status');
 const openModeratorLogBtn = document.getElementById('openModeratorLog');
 const moderatorLogModal = document.getElementById('moderatorLogModal');
 const moderatorLogList = document.getElementById('moderatorLogList');
-let myRole = 'player';
+
+function isElderRole(role){
+  const normalized = String(role ?? '').trim().toLowerCase();
+  return normalized === 'elder' || normalized === 'senior_moderator' || normalized === 'senior-moderator';
+}
 
 const state = {
   search: '',
@@ -284,8 +288,13 @@ onAuthStateChanged(auth, async user=>{
     const me = meSnap.exists() ? meSnap.data() : null;
     if(!me || me.situation!=='verified') return location.href='nick.html';
     if(me.role!=='moderator' && me.role!=='elder') return location.href='main.html';
-    myRole = me.role;
-    if(myRole === 'elder') openModeratorLogBtn.classList.remove('hidden');
+    if(isElderRole(me.role)){
+      openModeratorLogBtn.classList.remove('hidden');
+      openModeratorLogBtn.style.display = '';
+    } else {
+      openModeratorLogBtn.classList.add('hidden');
+      openModeratorLogBtn.style.display = 'none';
+    }
 
     await loadData();
     statusEl.textContent='';

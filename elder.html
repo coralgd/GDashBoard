@@ -49,7 +49,6 @@
         <button id="toggleList" class="toolbar-btn btn-hero">Показать уровни</button>
         <button id="openSubmissions" class="toolbar-btn btn-success">Отправки</button>
         <button id="openAddLevel" class="toolbar-btn">Добавить</button>
-        <button id="openSendMenu" class="toolbar-btn btn-ghost">Отправить</button>
         <button id="openArchive" class="toolbar-btn btn-ghost">Архив</button>
         <p class="small">Нажми на игрока или уровень, чтобы открыть подробное окно управления.</p>
       </div>
@@ -681,7 +680,6 @@ onAuthStateChanged(auth, async user=>{
 
 document.getElementById('backMain').onclick = ()=> location.href='main.html';
 document.getElementById('toggleList').onclick = ()=>{ showPlayers = !showPlayers; renderMainList(); };
-document.getElementById('openSendMenu').onclick = ()=> location.href='levels-menu.html';
 document.getElementById('openArchive').onclick = ()=> location.href='archive.html';
 
 document.getElementById('openSubmissions').onclick = ()=>{ selectedSubmissionId = ''; renderSubmissionList(); submissionsModal.classList.add('open'); };
