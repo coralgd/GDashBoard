@@ -8,7 +8,7 @@
   .panel{display:none;margin-top:14px}
   .panel.active{display:block}
   .row{border:1px solid #2d8cff55;background:rgba(0,20,50,.35);padding:12px;border-radius:10px;margin-bottom:12px}
-  .row input,.row textarea{width:100%;margin:6px 0}
+  .row input,.row textarea,.row select{width:100%;margin:6px 0}
   .small{font-size:12px;opacity:.85}
 </style>
 </head>
@@ -25,6 +25,7 @@
       <button data-tab="levels">Заявки уровней</button>
       <button data-tab="completions">Заявки прохождений</button>
       <button data-tab="manual">Поставить уровень в лист</button>
+      <button data-tab="users">Аккаунты</button>
     </div>
   </div>
 
@@ -41,13 +42,14 @@
       <p id="mMsg" class="small"></p>
     </div>
   </div>
+  <div id="users" class="panel"></div>
 </div>
 
 <script type="module">
-import { auth, db } from './firebase.js';
+import { auth, db, getNetworkErrorMessage } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
 import {
-  collection, query, where, getDocs, doc, updateDoc, getDoc, addDoc, serverTimestamp
+  collection, query, where, getDocs, doc, updateDoc, getDoc, addDoc, serverTimestamp, deleteDoc
 } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
 const statusEl = document.getElementById('status');
@@ -83,6 +85,63 @@ function calculateCompletionPoints(listRank, listSize, approvedCompletionsCount,
   const positionScore = scoringSettings.maximumPoints * Math.exp(-scoringSettings.rankDecayFactor * normalizedPosition);
   const antiGrindMultiplier = 1 / Math.pow(Math.max(1, approvedCompletionsCount), scoringSettings.repeatPenaltyPower);
   return Math.round(positionScore * antiGrindMultiplier * 100) / 100;
+}
+
+async function clearUserHistory(uid){
+  const [levelSub, completionSub, appealSub] = await Promise.all([
+    getDocs(query(collection(db,'level_submissions'), where('authorId','==',uid))),
+    getDocs(query(collection(db,'completion_submissions'), where('playerId','==',uid))),
+    getDocs(query(collection(db,'appeals'), where('playerId','==',uid)))
+  ]);
+
+  for (const d of levelSub.docs) await deleteDoc(doc(db,'level_submissions', d.id));
+  for (const d of completionSub.docs) await deleteDoc(doc(db,'completion_submissions', d.id));
+  for (const d of appealSub.docs) await deleteDoc(doc(db,'appeals', d.id));
+}
+
+async function loadUsersTab(me){
+  const box = document.getElementById('users');
+  box.innerHTML = 'Загрузка аккаунтов...';
+
+  const snap = await getDocs(query(collection(db,'users')));
+  box.innerHTML = '';
+
+  const rows = [];
+  snap.forEach(d => rows.push({id:d.id, ...d.data()}));
+  rows.sort((a,b)=>String(a.nick ?? '').localeCompare(String(b.nick ?? ''), 'ru'));
+
+  if(!rows.length){
+    box.innerHTML = '<p>Пользователи не найдены.</p>';
+    return;
+  }
+
+  rows.forEach(u => {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const isProtected = (u.id === me.uid) || (u.role === 'moderator' || u.role === 'elder');
+
+    row.innerHTML = `
+      <b>${u.nick ?? 'Без ника'}</b>
+      <p class="small">${u.email ?? '—'} · role=${u.role ?? 'player'} · status=${u.situation ?? '—'} · points=${Number(u.points ?? 0)}</p>
+      <div class="top-actions">
+        <button class="deleteUser btn-danger" ${isProtected ? 'disabled' : ''}>Удалить аккаунт</button>
+      </div>
+      <p class="small">${isProtected ? 'Нельзя удалять свой аккаунт и аккаунты модераторов/elder через эту панель.' : 'Удалит профиль и все отправки пользователя.'}</p>
+    `;
+
+    row.querySelector('.deleteUser').onclick = async ()=>{
+      if(!confirm(`Удалить аккаунт ${u.nick ?? 'Без ника'}?`)) return;
+      try {
+        await clearUserHistory(u.id);
+        await deleteDoc(doc(db,'users',u.id));
+        row.remove();
+      } catch (e) {
+        alert(getNetworkErrorMessage(e));
+      }
+    };
+
+    box.appendChild(row);
+  });
 }
 
 async function loadPendingLevels(me){
@@ -213,6 +272,7 @@ onAuthStateChanged(auth, async user => {
 
     await loadPendingLevels({uid:user.uid, nick:me.nick});
     await loadPendingCompletions({uid:user.uid, nick:me.nick});
+    await loadUsersTab({uid:user.uid, nick:me.nick});
     statusEl.textContent = '';
 
     document.getElementById('mAdd').onclick = async ()=>{
@@ -231,7 +291,7 @@ onAuthStateChanged(auth, async user => {
     };
   } catch (e) {
     console.error(e);
-    statusEl.textContent = 'Не удалось загрузить панель модерации.';
+    statusEl.textContent = getNetworkErrorMessage(e);
   }
 });
 </script>
