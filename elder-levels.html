@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Меню уровней старшего модератора</title>
+<link rel="stylesheet" href="hud.css">
+<style>
+  .panel{display:none;margin-top:14px}
+  .panel.active{display:block}
+  .row{border:1px solid #2d8cff55;background:rgba(0,20,50,.35);padding:10px;border-radius:8px;margin-bottom:10px}
+  .row input,.row textarea{width:100%;margin:6px 0}
+</style>
+</head>
+<body>
+<div class="hud" style="max-width:1100px;margin:40px auto;">
+  <div class="page-header">
+    <h1 style="margin:0;">Меню уровней старшего модератора</h1>
+    <button id="back" class="btn-ghost">Назад</button>
+  </div>
+  <p id="status" style="color:#00ffff;">Загрузка...</p>
+
+  <div class="tabs">
+    <button data-tab="appeals">Апелляции</button>
+    <button data-tab="levelSubmissions">Заявки уровней</button>
+    <button data-tab="completionSubmissions">Заявки прохождений</button>
+    <button data-tab="levelsManage">Лист уровней</button>
+    <button data-tab="settings">Параметры очков</button>
+  </div>
+
+  <div id="appeals" class="panel active"></div>
+  <div id="levelSubmissions" class="panel"></div>
+  <div id="completionSubmissions" class="panel"></div>
+  <div id="levelsManage" class="panel"></div>
+  <div id="settings" class="panel">
+    <div class="row">
+      <b>Настройка формулы очков</b>
+      <input id="maximumPoints" type="number" step="1" min="1" placeholder="maximumPoints (например 100)">
+      <input id="rankDecayFactor" type="number" step="0.1" min="0" placeholder="rankDecayFactor (например 3)">
+      <input id="repeatPenaltyPower" type="number" step="0.01" min="0" placeholder="repeatPenaltyPower (например 0.5)">
+      <p class="small">Формула: points = maximumPoints * e^(-rankDecayFactor*x) * 1/(k^repeatPenaltyPower), x=(rank-1)/(quantity-1)</p>
+      <button id="saveSettings">Сохранить параметры</button>
+      <p id="settingsMsg" class="small"></p>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { auth, db } from './firebase.js';
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
+import { collection, query, where, orderBy, getDocs, doc, updateDoc, getDoc, addDoc, deleteDoc, serverTimestamp, setDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+
+const statusEl = document.getElementById('status');
+document.getElementById('back').onclick = ()=> location.href='elder.html';
+
+function setTab(id){
+  document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  document.querySelectorAll('.tabs button').forEach(btn=>btn.classList.toggle('active', btn.dataset.tab===id));
+}
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
+
+async function getScoring(){
+  const snap = await getDoc(doc(db,'settings','scoring'));
+  const s = snap.exists() ? snap.data() : {};
+  return {
+    maximumPoints: Number(s.maximumPoints ?? s.maxPoints ?? 100),
+    rankDecayFactor: Number(s.rankDecayFactor ?? s.decayA ?? 3),
+    repeatPenaltyPower: Number(s.repeatPenaltyPower ?? s.grindPower ?? 0.5)
+  };
+}
+
+function calculateCompletionPoints(listRank, listSize, approvedCompletionsCount, scoringSettings){
+  const normalizedListSize = Math.max(2, Number(listSize || 2));
+  const normalizedRank = Math.max(1, Math.min(Number(listRank || 1), normalizedListSize));
+  const x = (normalizedRank - 1) / (normalizedListSize - 1);
+  return Math.round((scoringSettings.maximumPoints * Math.exp(-scoringSettings.rankDecayFactor * x) /
+    Math.pow(Math.max(1, approvedCompletionsCount), scoringSettings.repeatPenaltyPower)) * 100) / 100;
+}
+
+async function loadSettings(){
+  const s = await getScoring();
+  document.getElementById('maximumPoints').value = s.maximumPoints;
+  document.getElementById('rankDecayFactor').value = s.rankDecayFactor;
+  document.getElementById('repeatPenaltyPower').value = s.repeatPenaltyPower;
+}
+
+async function loadAppeals(elderUid){
+  const box = document.getElementById('appeals');
+  box.innerHTML = 'Загрузка апелляций...';
+  const snap = await getDocs(query(collection(db,'appeals'), where('status','==','pending')));
+  if(snap.empty){ box.innerHTML='<p>Нет апелляций.</p>'; return; }
+  box.innerHTML='';
+
+  snap.forEach(d=>{
+    const a = d.data();
+    const row = document.createElement('div');
+    row.className='row';
+    row.innerHTML = `
+      <b>${a.nick ?? 'Без ника'}</b><br>
+      <p>${a.text ?? ''}</p>
+      <p class="small">Ссылка: ${a.link || '—'} | Файл: ${a.fileUrl || '—'}</p>
+      <input class="note" placeholder="Ответ старшего модератора">
+      <button class="approve">Удовлетворить</button>
+      <button class="reject">Отклонить</button>
+    `;
+    box.appendChild(row);
+
+    row.querySelector('.approve').onclick = async ()=>{
+      const note = row.querySelector('.note').value.trim() || 'Апелляция удовлетворена';
+      await updateDoc(doc(db,'appeals',d.id), { status:'approved', note, reviewedBy:elderUid, reviewedAt:serverTimestamp() });
+      row.remove();
+    };
+    row.querySelector('.reject').onclick = async ()=>{
+      const note = row.querySelector('.note').value.trim() || 'Апелляция отклонена';
+      await updateDoc(doc(db,'appeals',d.id), { status:'rejected', note, reviewedBy:elderUid, reviewedAt:serverTimestamp() });
+      row.remove();
+    };
+  });
+}
+
+async function loadLevelSubmissions(elder){
+  const box = document.getElementById('levelSubmissions');
+  box.innerHTML = 'Загрузка заявок уровней...';
+  const snap = await getDocs(query(collection(db,'level_submissions'), where('status','==','pending')));
+  if(snap.empty){ box.innerHTML='<p>Нет заявок.</p>'; return; }
+  box.innerHTML = '';
+
+  snap.forEach(d=>{
+    const s = d.data();
+    const row = document.createElement('div');
+    row.className='row';
+    row.innerHTML = `
+      <b>${s.nick ?? 'Без ника'}</b><br>
+      <a href="${s.link}" target="_blank">Ссылка</a>
+      <p>${s.text ?? ''}</p>
+      <p class="small">Файл: ${s.fileUrl || '—'}</p>
+      <input placeholder="Комментарий" class="note">
+      <input type="number" min="1" placeholder="Место в листе" class="rank">
+      <div class="top-actions">
+        <button class="approve">Одобрить и поставить в лист</button>
+        <button class="reject btn-danger">Отклонить</button>
+      </div>
+    `;
+    box.appendChild(row);
+
+    row.querySelector('.approve').onclick = async ()=>{
+      const note = row.querySelector('.note').value.trim();
+      const rank = Number(row.querySelector('.rank').value);
+      if(!rank){ alert('Укажи место'); return; }
+      await addDoc(collection(db,'levels'), {
+        link:s.link, text:s.text ?? '', fileUrl:s.fileUrl ?? '', rank,
+        addedBy:elder.uid, addedByNick:elder.nick ?? 'elder', createdAt:serverTimestamp(),
+        sourceSubmissionId:d.id, status:'active'
+      });
+      await updateDoc(doc(db,'level_submissions',d.id), {
+        status:'approved', note, reviewedBy:elder.uid, reviewedAt:serverTimestamp(), finalRank:rank
+      });
+      row.remove();
+    };
+
+    row.querySelector('.reject').onclick = async ()=>{
+      const note = row.querySelector('.note').value.trim() || 'Отклонено старшим модератором';
+      await updateDoc(doc(db,'level_submissions',d.id), { status:'rejected', note, reviewedBy:elder.uid, reviewedAt:serverTimestamp() });
+      row.remove();
+    };
+  });
+}
+
+async function loadCompletionSubmissions(elder){
+  const box = document.getElementById('completionSubmissions');
+  box.innerHTML = 'Загрузка заявок прохождений...';
+  const snap = await getDocs(query(collection(db,'completion_submissions'), where('status','==','pending')));
+  if(snap.empty){ box.innerHTML='<p>Нет заявок.</p>'; return; }
+
+  const levelsSnap = await getDocs(collection(db,'levels'));
+  const levels = [];
+  levelsSnap.forEach(d=>{
+    const lv = d.data();
+    if(lv.status === 'archived') return;
+    levels.push({id:d.id, ...lv});
+  });
+  levels.sort((a,b)=>Number(a.rank ?? 999999) - Number(b.rank ?? 999999));
+  const quantity = Math.max(levels.length, 2);
+  const scoreCfg = await getScoring();
+  box.innerHTML = '';
+
+  snap.forEach(d=>{
+    const s = d.data();
+    const row = document.createElement('div');
+    row.className='row';
+    const levelOptions = levels.map(lv=>
+      `<option value="${Number(lv.rank ?? 0)}">#${Number(lv.rank ?? 0)} · ${String(lv.text ?? 'Без названия').slice(0,80)}</option>`
+    ).join('');
+    row.innerHTML = `
+      <b>${s.nick ?? 'Без ника'}</b><br>
+      <a href="${s.link}" target="_blank">Доказательство</a>
+      <p>${s.text ?? ''}</p>
+      <p class="small">Файл: ${s.fileUrl || '—'}</p>
+      <select class="levelRank">
+        <option value="">Выбери уровень из листа</option>
+        ${levelOptions}
+      </select>
+      <p class="small pointsPreview">Очки за подтверждение: —</p>
+      <input placeholder="Комментарий" class="note">
+      <div class="top-actions">
+        <button class="approve">Подтвердить прохождение</button>
+        <button class="reject btn-danger">Отклонить</button>
+      </div>
+    `;
+    box.appendChild(row);
+    const rankSelect = row.querySelector('.levelRank');
+    const pointsPreview = row.querySelector('.pointsPreview');
+
+    const updatePreview = async ()=>{
+      const rank = Number(rankSelect.value);
+      if(!rank){ pointsPreview.textContent = 'Очки за подтверждение: —'; return; }
+      const userComps = await getDocs(query(collection(db,'completion_submissions'), where('playerId','==',s.playerId)));
+      let approvedCount = 0;
+      userComps.forEach(x=>{ if(x.data().status==='approved') approvedCount++; });
+      const earned = calculateCompletionPoints(rank, quantity, approvedCount + 1, scoreCfg);
+      pointsPreview.textContent = `Очки за подтверждение: ${earned}`;
+    };
+    rankSelect.onchange = ()=>{ updatePreview(); };
+
+    row.querySelector('.approve').onclick = async ()=>{
+      const note = row.querySelector('.note').value.trim();
+      const rank = Number(rankSelect.value);
+      if(!rank){ alert('Выбери уровень из листа'); return; }
+
+      const userRef = doc(db,'users',s.playerId);
+      const userSnap = await getDoc(userRef);
+      const u = userSnap.exists() ? userSnap.data() : null;
+      if(!u){ alert('Игрок не найден'); return; }
+
+      const userComps = await getDocs(query(collection(db,'completion_submissions'), where('playerId','==',s.playerId)));
+      let approvedCount = 0;
+      userComps.forEach(x=>{ if(x.data().status==='approved') approvedCount++; });
+      const earned = calculateCompletionPoints(rank, quantity, approvedCount + 1, scoreCfg);
+
+      await updateDoc(userRef, { points:Number(u.points ?? 0) + earned });
+      await updateDoc(doc(db,'completion_submissions',d.id), {
+        status:'approved', note, reviewedBy:elder.uid, reviewedAt:serverTimestamp(),
+        awardedPoints:earned, listRank:rank, listQuantity:quantity, scoreK:approvedCount + 1
+      });
+      row.remove();
+    };
+
+    row.querySelector('.reject').onclick = async ()=>{
+      const note = row.querySelector('.note').value.trim() || 'Отклонено старшим модератором';
+      await updateDoc(doc(db,'completion_submissions',d.id), { status:'rejected', note, reviewedBy:elder.uid, reviewedAt:serverTimestamp() });
+      row.remove();
+    };
+  });
+}
+
+async function loadLevelsManage(elder){
+  const box = document.getElementById('levelsManage');
+  box.innerHTML = 'Загрузка листа уровней...';
+  const snap = await getDocs(query(collection(db,'levels'), orderBy('rank','asc')));
+  if(snap.empty){ box.innerHTML='<p>Лист уровней пуст.</p>'; return; }
+  const levels = [];
+  snap.forEach(d=>levels.push({id:d.id, ...d.data()}));
+  const activeLevels = levels.filter(lv=>lv.status !== 'archived');
+  const quantity = Math.max(activeLevels.length, 2);
+  const scoreCfg = await getScoring();
+  box.innerHTML = '';
+
+  activeLevels.forEach(lv=>{
+    const levelPoints = calculateCompletionPoints(Number(lv.rank ?? 1), quantity, 1, scoreCfg);
+    const row = document.createElement('div');
+    row.className='row';
+    row.innerHTML = `
+      <b>#${lv.rank ?? '—'}</b><br>
+      <a href="${lv.link}" target="_blank">Ссылка</a>
+      <p class="small">Очки за прохождение: ${levelPoints}</p>
+      <textarea class="text">${lv.text ?? ''}</textarea>
+      <input class="link" value="${lv.link ?? ''}" placeholder="Ссылка">
+      <input class="file" value="${lv.fileUrl ?? ''}" placeholder="Файл">
+      <input class="rank" type="number" min="1" value="${lv.rank ?? 1}" placeholder="Место">
+      <div class="top-actions">
+        <button class="save">Сохранить изменения</button>
+        <button class="delete btn-danger">Удалить уровень</button>
+      </div>
+    `;
+    box.appendChild(row);
+
+    row.querySelector('.save').onclick = async ()=>{
+      const rank = Number(row.querySelector('.rank').value);
+      const link = row.querySelector('.link').value.trim();
+      const text = row.querySelector('.text').value.trim();
+      const fileUrl = row.querySelector('.file').value.trim();
+      if(!rank || !link){ alert('Нужны место и ссылка'); return; }
+      await updateDoc(doc(db,'levels',lv.id), { rank, link, text, fileUrl, updatedBy:elder.uid, updatedAt:serverTimestamp() });
+      row.style.outline = '1px solid rgba(32,245,204,.7)';
+    };
+
+    row.querySelector('.delete').onclick = async ()=>{
+      if(!confirm('Удалить уровень из листа?')) return;
+      await deleteDoc(doc(db,'levels',lv.id));
+      row.remove();
+    };
+  });
+}
+
+onAuthStateChanged(auth, async user=>{
+  if(!user) return location.href='index.html';
+  try {
+    const meSnap = await getDoc(doc(db,'users',user.uid));
+    const me = meSnap.exists() ? meSnap.data() : null;
+    if(!me || me.situation!=='verified') return location.href='nick.html';
+    if(me.role!=='elder') return location.href='main.html';
+
+    await Promise.all([
+      loadAppeals(user.uid),
+      loadLevelSubmissions({uid:user.uid, nick:me.nick}),
+      loadCompletionSubmissions({uid:user.uid, nick:me.nick}),
+      loadLevelsManage({uid:user.uid, nick:me.nick}),
+      loadSettings()
+    ]);
+    statusEl.textContent = '';
+
+    document.getElementById('saveSettings').onclick = async ()=>{
+      const maximumPoints = Number(document.getElementById('maximumPoints').value);
+      const rankDecayFactor = Number(document.getElementById('rankDecayFactor').value);
+      const repeatPenaltyPower = Number(document.getElementById('repeatPenaltyPower').value);
+      const msg = document.getElementById('settingsMsg');
+      await setDoc(doc(db,'settings','scoring'), {
+        maximumPoints, rankDecayFactor, repeatPenaltyPower,
+        maxPoints: maximumPoints, decayA: rankDecayFactor, grindPower: repeatPenaltyPower,
+        updatedBy:user.uid, updatedAt:serverTimestamp()
+      }, { merge:true });
+      msg.textContent = 'Параметры сохранены.';
+    };
+  } catch (e) {
+    console.error(e);
+    statusEl.textContent = 'Не удалось загрузить меню уровней старшего модератора.';
+  }
+});
+</script>
+</body>
+</html>
