@@ -10,7 +10,7 @@
 </style>
 </head>
 <body>
-<div class="hud" style="max-width:900px;margin:40px auto;">
+<div class="hud" style="max-width:1000px;margin:40px auto;">
   <div class="page-header">
     <h1 style="margin:0;">Лидерборд</h1>
     <button id="back" class="btn-ghost">На главную</button>
@@ -24,13 +24,21 @@
   </div>
 
   <div id="playersPanel" class="panel active">
-    <div class="row small"><div>#</div><div>Ник</div><div>Очки</div></div>
     <div id="playersList"></div>
   </div>
 
   <div id="levelsPanel" class="panel">
-    <div class="row small"><div>#</div><div>Название</div><div>Ссылка</div></div>
     <div id="levelsList"></div>
+  </div>
+</div>
+
+<div id="modal" class="dialog-backdrop">
+  <div class="dialog">
+    <div class="page-header">
+      <h2 id="modalTitle" style="margin:0;">Детали</h2>
+      <button id="closeModal" class="btn-ghost">Закрыть</button>
+    </div>
+    <div id="modalBody"></div>
   </div>
 
   <p id="status" style="color:#00ffff;">Загрузка...</p>
@@ -43,13 +51,19 @@
 <script type="module">
 import { auth, db, getNetworkErrorMessage } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import { collection, getDocs, orderBy, query, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+import { collection, getDocs, orderBy, query, where, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
 const statusEl = document.getElementById('status');
 const playersList = document.getElementById('playersList');
 const levelsList = document.getElementById('levelsList');
 const playersPanel = document.getElementById('playersPanel');
 const levelsPanel = document.getElementById('levelsPanel');
+const modal = document.getElementById('modal');
+const modalTitle = document.getElementById('modalTitle');
+const modalBody = document.getElementById('modalBody');
+
+let approvedCompletions = [];
+let levelsById = new Map();
 
 function setView(name){
   const players = name === 'players';
@@ -59,9 +73,87 @@ function setView(name){
   document.getElementById('showLevels').classList.toggle('btn-success', !players);
 }
 
+function openModal(title, html){
+  modalTitle.textContent = title;
+  modalBody.innerHTML = html;
+  modal.classList.add('open');
+}
+
 document.getElementById('showPlayers').onclick = ()=> setView('players');
 document.getElementById('showLevels').onclick = ()=> setView('levels');
 document.getElementById('back').onclick = ()=> location.href='main.html';
+document.getElementById('closeModal').onclick = ()=> modal.classList.remove('open');
+
+function renderPlayers(users){
+  playersList.innerHTML = '';
+
+  if(!users.length){
+    playersList.innerHTML = '<p>Нет верифицированных игроков.</p>';
+    return;
+  }
+
+  users.forEach(u => {
+    const row = document.createElement('div');
+    row.className = 'row list-item clickable';
+    row.innerHTML = `<div>${u.rank}</div><div>${u.nick ?? 'Без ника'}</div><div>${u.points}</div>`;
+
+    row.onclick = ()=>{
+      const mine = approvedCompletions.filter(x=>x.playerId===u.id);
+      if(!mine.length){
+        openModal(`Игрок: ${u.nick ?? 'Без ника'}`, '<p>Подтвержденных прохождений нет.</p>');
+        return;
+      }
+
+      let html = '<div class="row small"><div>#</div><div>Уровень</div><div>Очки</div></div>';
+      mine
+        .sort((a,b)=>(a.reviewedAt?.seconds ?? 0) - (b.reviewedAt?.seconds ?? 0))
+        .forEach((c, idx)=>{
+          const level = c.levelId ? levelsById.get(c.levelId) : null;
+          const levelName = level?.text ?? c.text ?? 'Уровень';
+          html += `<div class="row list-item"><div>${idx+1}</div><div>${levelName}</div><div>${Number(c.awardedPoints ?? 0)}</div></div>`;
+        });
+      openModal(`Игрок: ${u.nick ?? 'Без ника'}`, html);
+    };
+
+    playersList.appendChild(row);
+  });
+}
+
+function renderLevels(levels){
+  levelsList.innerHTML = '';
+
+  if(!levels.length){
+    levelsList.innerHTML = '<p>Лист уровней пуст.</p>';
+    return;
+  }
+
+  levels.forEach(l => {
+    const row = document.createElement('div');
+    row.className = 'row list-item clickable';
+    row.innerHTML = `<div>${Number(l.rank ?? 0) || '—'}</div><div>${l.text ?? 'Без названия'}</div><div><a target="_blank" href="${l.link ?? '#'}">Открыть</a></div>`;
+
+    row.onclick = (e)=>{
+      if(e.target.tagName === 'A') return;
+      const passed = approvedCompletions.filter(c => {
+        if(c.levelId && l.id) return c.levelId === l.id;
+        return Number(c.listRank ?? -1) === Number(l.rank ?? -2);
+      });
+
+      if(!passed.length){
+        openModal(`Уровень #${l.rank ?? '—'}`, '<p>Этот уровень пока никто не прошел.</p>');
+        return;
+      }
+
+      let html = '<div class="row small"><div>#</div><div>Игрок</div><div>Очки</div></div>';
+      passed.forEach((c, idx)=>{
+        html += `<div class="row list-item"><div>${idx+1}</div><div>${c.nick ?? 'Без ника'}</div><div>${Number(c.awardedPoints ?? 0)}</div></div>`;
+      });
+      openModal(`Уровень #${l.rank ?? '—'}`, html);
+    };
+
+    levelsList.appendChild(row);
+  });
+}
 
 onAuthStateChanged(auth, async user => {
   if(!user) return location.href='index.html';
@@ -71,9 +163,13 @@ onAuthStateChanged(auth, async user => {
     const me = meSnap.exists() ? meSnap.data() : null;
     if(!me || me.situation!=='verified') return location.href='nick.html';
 
-    const usersSnap = await getDocs(query(collection(db,'users'), orderBy('points','desc')));
-    playersList.innerHTML = '';
+    const [usersSnap, levelsSnap, compSnap] = await Promise.all([
+      getDocs(query(collection(db,'users'), orderBy('points','desc'))),
+      getDocs(query(collection(db,'levels'), orderBy('rank','asc'))),
+      getDocs(query(collection(db,'completion_submissions'), where('status','==','approved')))
+    ]);
 
+    const users = [];
     let seen = 0;
     let rank = 0;
     let lastPoints = null;
@@ -88,33 +184,24 @@ onAuthStateChanged(auth, async user => {
         rank = seen;
         lastPoints = points;
       }
-
-      const row = document.createElement('div');
-      row.className = 'row list-item';
-      row.innerHTML = `<div>${rank}</div><div>${u.nick ?? 'Без ника'}</div><div>${points}</div>`;
-      playersList.appendChild(row);
+      users.push({ id:d.id, ...u, points, rank });
     });
 
-    const levelsSnap = await getDocs(query(collection(db,'levels'), orderBy('rank','asc')));
-    levelsList.innerHTML = '';
+    const levels = [];
+    levelsById = new Map();
     levelsSnap.forEach(d => {
       const l = d.data();
       if(l.status === 'archived') return;
-      const row = document.createElement('div');
-      row.className = 'row list-item';
-      row.innerHTML = `<div>${Number(l.rank ?? 0) || '—'}</div><div>${l.text ?? 'Без названия'}</div><div><a target="_blank" href="${l.link ?? '#'}">Открыть</a></div>`;
-      levelsList.appendChild(row);
+      const item = { id:d.id, ...l };
+      levels.push(item);
+      levelsById.set(d.id, item);
     });
 
-    if(!playersList.children.length){
-      statusEl.textContent = 'Нет верифицированных игроков.';
-      return;
-    }
-    if(!levelsList.children.length){
-      const empty = document.createElement('p');
-      empty.textContent = 'Лист уровней пуст.';
-      levelsList.appendChild(empty);
-    }
+    approvedCompletions = [];
+    compSnap.forEach(d=>approvedCompletions.push({ id:d.id, ...d.data() }));
+
+    renderPlayers(users);
+    renderLevels(levels);
 
     statusEl.textContent = '';
     setView('players');
