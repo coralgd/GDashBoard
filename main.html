@@ -1,14 +1,122 @@
-<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8"><title>Главная</title><link rel="stylesheet" href="hud.css"></head><body>
-<div class="hud" style="max-width:860px;text-align:center;">
-  <h1>Главная</h1><p id="status" style="color:#00ffff">Загрузка...</p>
-  <div class="list-item"><p id="nick">Ник: —</p><p id="points">Очки: 0</p><p id="place">Место: —</p><p id="role">Роль: player</p></div>
-  <div class="top-actions" style="justify-content:center"><button id="goBoard">Лидерборд</button><button id="goLevels">Меню уровней</button><button id="goMod">Модерация</button></div>
-  <p id="err" style="color:#ff98b3"></p><p id="version" class="small"></p>
-</div>
-<script type="module">
-import { auth, db, getNetworkErrorMessage } from './firebase.js';
-import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import { collection, doc, getDoc, getDocs, orderBy, query } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
-document.getElementById('version').textContent='Версия: V4 rebuild · 2026-04-05';
-onAuthStateChanged(auth, async u=>{if(!u) return location.href='index.html'; try {const s=await getDoc(doc(db,'users',u.uid));const me=s.exists()?s.data():null;if(!me||me.situation!=='verified') return location.href='nick.html';document.getElementById('nick').textContent=`Ник: ${me.nick??'—'}`;document.getElementById('points').textContent=`Очки: ${Number(me.points??0)}`;document.getElementById('role').textContent=`Роль: ${me.role??'player'}`;const all=await getDocs(query(collection(db,'users'),orderBy('points','desc')));let i=0,rank=0,last=null,place='—';all.forEach(d=>{const x=d.data();if(x.situation!=='verified')return;i++;if(x.points!==last){rank=i;last=x.points;}if(d.id===u.uid)place=String(rank);});document.getElementById('place').textContent=`Место: ${place}`;document.getElementById('goBoard').onclick=()=>location.href='leaderboard.html';document.getElementById('goLevels').onclick=()=>location.href='levels-menu.html';document.getElementById('goMod').onclick=()=>{if(me.role==='elder') return location.href='elder.html';if(me.role==='moderator') return location.href='moderator.html';document.getElementById('err').textContent='Нет прав модерации';};document.getElementById('status').textContent='';} catch(e){document.getElementById('status').textContent=getNetworkErrorMessage(e);} });
-</script></body></html>
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Главная</title>
+  <link rel="stylesheet" href="hud.css">
+</head>
+<body>
+  <div class="hud" style="max-width:860px;text-align:center;">
+    <h1>Главная</h1>
+    <p id="status" style="color:#00ffff">Загрузка...</p>
+
+    <div class="list-item">
+      <p id="nick">Ник: —</p>
+      <p id="points">Очки: 0</p>
+      <p id="place">Место: —</p>
+      <p id="role">Роль: player</p>
+    </div>
+
+    <div class="top-actions" style="justify-content:center">
+      <button id="goBoard">Лидерборд</button>
+      <button id="goLevels">Меню уровней</button>
+      <button id="goMod">Модерация</button>
+      <button id="logout" class="btn-ghost">Выйти</button>
+      <button id="deleteSelf" class="btn-danger">Удалить мой аккаунт</button>
+    </div>
+
+    <p id="err" style="color:#ff98b3"></p>
+    <p id="version" class="small"></p>
+  </div>
+
+  <script type="module">
+    import { auth, db, getNetworkErrorMessage } from './firebase.js';
+    import { deleteUser, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
+    import { collection, deleteDoc, doc, getDoc, getDocs, orderBy, query } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+
+    const status = document.getElementById('status');
+    const err = document.getElementById('err');
+    let currentUser = null;
+
+    document.getElementById('version').textContent = 'Версия: V4 hotfix · 2026-04-05';
+
+    document.getElementById('goBoard').onclick = () => location.href = 'leaderboard.html';
+    document.getElementById('goLevels').onclick = () => location.href = 'levels-menu.html';
+    document.getElementById('logout').onclick = async () => {
+      try {
+        await signOut(auth);
+        location.href = 'index.html';
+      } catch (e) {
+        err.textContent = getNetworkErrorMessage(e);
+      }
+    };
+
+    document.getElementById('deleteSelf').onclick = async () => {
+      if (!currentUser) return;
+      const ok = confirm('Удалить ваш аккаунт?\n\nПрофиль будет удален. Может потребоваться повторный вход для полного удаления Auth-аккаунта.');
+      if (!ok) return;
+
+      try {
+        await deleteDoc(doc(db, 'users', currentUser.uid));
+      } catch (e) {
+        err.textContent = `Профиль не удален: ${getNetworkErrorMessage(e)}`;
+        return;
+      }
+
+      try {
+        await deleteUser(currentUser);
+        location.href = 'index.html';
+      } catch {
+        err.textContent = 'Профиль удален. Для полного удаления Auth-аккаунта Firebase может требовать повторный вход.';
+        await signOut(auth);
+        location.href = 'index.html';
+      }
+    };
+
+    onAuthStateChanged(auth, async user => {
+      if (!user) return location.href = 'index.html';
+      currentUser = user;
+
+      try {
+        const s = await getDoc(doc(db, 'users', user.uid));
+        const me = s.exists() ? s.data() : null;
+
+        if (!me || me.situation !== 'verified') return location.href = 'nick.html';
+
+        document.getElementById('nick').textContent = `Ник: ${me.nick ?? '—'}`;
+        document.getElementById('points').textContent = `Очки: ${Number(me.points ?? 0)}`;
+        document.getElementById('role').textContent = `Роль: ${me.role ?? 'player'}`;
+
+        const all = await getDocs(query(collection(db, 'users'), orderBy('points', 'desc')));
+        let i = 0;
+        let rank = 0;
+        let last = null;
+        let place = '—';
+
+        all.forEach(d => {
+          const x = d.data();
+          if (x.situation !== 'verified') return;
+          i++;
+          if (x.points !== last) {
+            rank = i;
+            last = x.points;
+          }
+          if (d.id === user.uid) place = String(rank);
+        });
+
+        document.getElementById('place').textContent = `Место: ${place}`;
+
+        document.getElementById('goMod').onclick = () => {
+          if (me.role === 'elder') return location.href = 'elder.html';
+          if (me.role === 'moderator') return location.href = 'moderator.html';
+          err.textContent = 'Нет прав модерации';
+        };
+
+        status.textContent = '';
+      } catch (e) {
+        status.textContent = getNetworkErrorMessage(e);
+      }
+    });
+  </script>
+</body>
+</html>

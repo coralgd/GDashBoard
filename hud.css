@@ -19,3 +19,6 @@ input,select,textarea{width:100%;padding:8px;border:1px solid #3f8fcc99;border-r
 .dialog{width:min(980px,95vw);max-height:88vh;overflow:auto;background:#09182b;border:1px solid #3f8fccaa;border-radius:12px;padding:14px}
 .moderator{color:#79c7ff}.elder{color:#ff7b7b}.unverified{color:#93a0b1;opacity:.7}
 @media(max-width:760px){.row{grid-template-columns:1fr}}
+
+.clickable{cursor:pointer}
+button:disabled{opacity:.5;cursor:not-allowed}
