@@ -26,13 +26,8 @@
     <button id="showLevels">Лист уровней</button>
   </div>
 
-  <div id="playersPanel" class="panel active">
-    <div id="playersList"></div>
-  </div>
-
-  <div id="levelsPanel" class="panel">
-    <div id="levelsList"></div>
-  </div>
+  <div id="playersPanel" class="panel active"><div id="playersList"></div></div>
+  <div id="levelsPanel" class="panel"><div id="levelsList"></div></div>
 </div>
 
 <div id="modal" class="dialog-backdrop">
@@ -65,6 +60,7 @@ const modal = document.getElementById('modal');
 const modalTitle = document.getElementById('modalTitle');
 const modalBody = document.getElementById('modalBody');
 
+let allCompletions = [];
 let approvedCompletions = [];
 let levelsById = new Map();
 
@@ -82,6 +78,75 @@ function openModal(title, html){
   modal.classList.add('open');
 }
 
+function formatModeration(x){
+  const who = x.reviewedBy ?? '—';
+  const when = x.reviewedAt?.seconds ? new Date(x.reviewedAt.seconds * 1000).toLocaleString('ru-RU') : '—';
+  return `status=${x.status ?? '—'} · note=${x.note ?? '—'} · reviewedBy=${who} · reviewedAt=${when}`;
+}
+
+function openPlayerLevelHistory(user, levelId, levelRank){
+  const records = allCompletions
+    .filter(x => x.playerId === user.id)
+    .filter(x => {
+      if(levelId && x.levelId) return x.levelId === levelId;
+      return Number(x.listRank ?? -1) === Number(levelRank ?? -2);
+    })
+    .sort((a,b)=>(a.createdAt?.seconds ?? 0) - (b.createdAt?.seconds ?? 0));
+
+  const levelName = levelId ? (levelsById.get(levelId)?.text ?? 'Уровень') : `Уровень #${levelRank ?? '—'}`;
+
+  if(!records.length){
+    openModal(`История по уровню: ${levelName}`, '<p>Отправок по этому уровню не найдено.</p>');
+    return;
+  }
+
+  let html = `<p><b>Игрок:</b> ${user.nick ?? 'Без ника'}</p><p><b>Уровень:</b> ${levelName}</p>`;
+  html += '<table class="modal-table"><thead><tr><th>#</th><th>Что отправил</th><th>Модерация</th></tr></thead><tbody>';
+  records.forEach((x, i)=>{
+    const sent = `${x.text ?? ''} ${x.link ? ' | '+x.link : ''} ${x.fileUrl ? ' | файл: '+x.fileUrl : ''} ${x.referenceSubmissionId ? ' | ref:'+x.referenceSubmissionId : ''}`.trim();
+    html += `<tr><td>${i+1}</td><td>${sent || '—'}</td><td>${formatModeration(x)}</td></tr>`;
+  });
+  html += '</tbody></table>';
+  openModal(`История по уровню: ${levelName}`, html);
+}
+
+function openPlayerCompletions(user){
+  const mineApproved = approvedCompletions
+    .filter(x=>x.playerId===user.id)
+    .sort((a,b)=>Number(a.listRank ?? 9999) - Number(b.listRank ?? 9999));
+
+  let html = `
+    <p><b>Ник:</b> ${user.nick ?? 'Без ника'}</p>
+    <p><b>Почта:</b> ${user.email ?? '—'}</p>
+    <p><b>Роль:</b> ${user.role ?? 'player'}</p>
+    <p><b>Статус:</b> ${user.situation ?? '—'}</p>
+    <p><b>Очки:</b> ${Number(user.points ?? 0)}</p>
+    <p><b>Место в топе:</b> ${user.rank}</p>
+    <p><b>Подтвержденных прохождений:</b> ${mineApproved.length}</p>
+  `;
+
+  if(!mineApproved.length){
+    html += '<p>Подтвержденных прохождений нет.</p>';
+    openModal(`Игрок: ${user.nick ?? 'Без ника'}`, html);
+    return;
+  }
+
+  html += '<table class="modal-table"><thead><tr><th>#Сложн.</th><th>Уровень</th><th>Очки</th><th>Действие</th></tr></thead><tbody>';
+  mineApproved.forEach(c=>{
+    const level = c.levelId ? levelsById.get(c.levelId) : null;
+    const levelName = level?.text ?? c.text ?? 'Уровень';
+    const lvlRank = Number(c.listRank ?? level?.rank ?? 9999);
+    html += `<tr><td>${lvlRank}</td><td>${levelName}</td><td>${Number(c.awardedPoints ?? 0)}</td><td><button class="openHistory" data-level-id="${c.levelId ?? ''}" data-level-rank="${lvlRank}">Все отправки по уровню</button></td></tr>`;
+  });
+  html += '</tbody></table>';
+
+  openModal(`Игрок: ${user.nick ?? 'Без ника'}`, html);
+
+  modalBody.querySelectorAll('.openHistory').forEach(btn=>{
+    btn.onclick = ()=> openPlayerLevelHistory(user, btn.dataset.levelId || '', Number(btn.dataset.levelRank || 0));
+  });
+}
+
 document.getElementById('showPlayers').onclick = ()=> setView('players');
 document.getElementById('showLevels').onclick = ()=> setView('levels');
 document.getElementById('back').onclick = ()=> location.href='main.html';
@@ -89,7 +154,6 @@ document.getElementById('closeModal').onclick = ()=> modal.classList.remove('ope
 
 function renderPlayers(users){
   playersList.innerHTML = '';
-
   if(!users.length){
     playersList.innerHTML = '<p>Нет верифицированных игроков.</p>';
     return;
@@ -101,46 +165,13 @@ function renderPlayers(users){
     if(u.role==='moderator') row.classList.add('moderator');
     if(u.role==='elder') row.classList.add('elder');
     row.innerHTML = `<div>${u.rank}</div><div>${u.nick ?? 'Без ника'}</div><div>${u.points}</div>`;
-
-    row.onclick = ()=>{
-      const mine = approvedCompletions.filter(x=>x.playerId===u.id);
-
-      let html = `
-        <p><b>Ник:</b> ${u.nick ?? 'Без ника'}</p>
-        <p><b>Почта:</b> ${u.email ?? '—'}</p>
-        <p><b>Роль:</b> ${u.role ?? 'player'}</p>
-        <p><b>Статус:</b> ${u.situation ?? '—'}</p>
-        <p><b>Очки:</b> ${Number(u.points ?? 0)}</p>
-        <p><b>Место в топе:</b> ${u.rank}</p>
-        <p><b>Подтвержденных прохождений:</b> ${mine.length}</p>
-      `;
-
-      if(!mine.length){
-        html += '<p>Подтвержденных прохождений нет.</p>';
-        openModal(`Игрок: ${u.nick ?? 'Без ника'}`, html);
-        return;
-      }
-
-      html += '<table class="modal-table"><thead><tr><th>#</th><th>Уровень</th><th>Что отправил</th><th>Очки</th><th>Статус/коммент</th></tr></thead><tbody>';
-      mine
-        .sort((a,b)=>(a.reviewedAt?.seconds ?? 0) - (b.reviewedAt?.seconds ?? 0))
-        .forEach((c, idx)=>{
-          const level = c.levelId ? levelsById.get(c.levelId) : null;
-          const levelName = level?.text ?? c.text ?? 'Уровень';
-          const sent = `${c.text ?? ''} ${c.link ? ' | '+c.link : ''} ${c.fileUrl ? ' | файл: '+c.fileUrl : ''}`.trim();
-          html += `<tr><td>${idx+1}</td><td>${levelName}</td><td>${sent || '—'}</td><td>${Number(c.awardedPoints ?? 0)}</td><td>${c.status ?? 'approved'} / ${c.note ?? '—'}</td></tr>`;
-        });
-      html += '</tbody></table>';
-      openModal(`Игрок: ${u.nick ?? 'Без ника'}`, html);
-    };
-
+    row.onclick = ()=> openPlayerCompletions(u);
     playersList.appendChild(row);
   });
 }
 
 function renderLevels(levels){
   levelsList.innerHTML = '';
-
   if(!levels.length){
     levelsList.innerHTML = '<p>Лист уровней пуст.</p>';
     return;
@@ -183,9 +214,10 @@ onAuthStateChanged(auth, async user => {
     const me = meSnap.exists() ? meSnap.data() : null;
     if(!me || me.situation!=='verified') return location.href='nick.html';
 
-    const [usersSnap, levelsSnap, compSnap] = await Promise.all([
+    const [usersSnap, levelsSnap, allCompSnap, approvedSnap] = await Promise.all([
       getDocs(query(collection(db,'users'), orderBy('points','desc'))),
       getDocs(query(collection(db,'levels'), orderBy('rank','asc'))),
+      getDocs(collection(db,'completion_submissions')),
       getDocs(query(collection(db,'completion_submissions'), where('status','==','approved')))
     ]);
 
@@ -197,13 +229,9 @@ onAuthStateChanged(auth, async user => {
     usersSnap.forEach(d => {
       const u = d.data();
       if(u.situation !== 'verified') return;
-
       const points = Number(u.points ?? 0);
       seen += 1;
-      if(lastPoints !== points){
-        rank = seen;
-        lastPoints = points;
-      }
+      if(lastPoints !== points){ rank = seen; lastPoints = points; }
       users.push({ id:d.id, ...u, points, rank });
     });
 
@@ -217,8 +245,11 @@ onAuthStateChanged(auth, async user => {
       levelsById.set(d.id, item);
     });
 
+    allCompletions = [];
+    allCompSnap.forEach(d=>allCompletions.push({ id:d.id, ...d.data() }));
+
     approvedCompletions = [];
-    compSnap.forEach(d=>approvedCompletions.push({ id:d.id, ...d.data() }));
+    approvedSnap.forEach(d=>approvedCompletions.push({ id:d.id, ...d.data() }));
 
     renderPlayers(users);
     renderLevels(levels);
