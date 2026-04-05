@@ -53,23 +53,9 @@ onAuthStateChanged(auth, async user => {
 
     info.textContent = `Ник: ${profile.nick ?? '—'}`;
     pointsEl.textContent = `Баллы: ${Number(profile.points ?? 0)}`;
+    placeEl.textContent = `Место: —`;
 
-    const usersSnap = await getDocs(query(collection(db,'users'), orderBy('points','desc')));
-    let rank = 0, place = '—', last = null, seen = 0;
-    usersSnap.forEach(d=>{
-      const u = d.data();
-      if(u.situation!=='verified' && u.situation!=='freezed') return;
-      seen++;
-      if(u.points !== last){ rank = seen; last = u.points; }
-      if(d.id===user.uid) place = String(rank);
-    });
-    placeEl.textContent = `Место: ${place}`;
-    const msgSnap = await getDocs(query(collection(db,'moderator_messages'), where('playerId','==',user.uid)));
-    const messages = [];
-    msgSnap.forEach(d=>messages.push(d.data()));
-    messages.sort((a,b)=>(b.createdAt?.seconds ?? 0)-(a.createdAt?.seconds ?? 0));
-    messagesBox.innerHTML = `<h3 style="margin-top:0;">Сообщения от модераторов</h3>${messages.map(m=>`<div class="list-item"><b>${m.authorNick ?? 'модератор'}</b><p class="small">${m.text ?? ''}</p></div>`).join('') || '<p class="small">Пока нет сообщений.</p>'}`;
-
+    // Кнопки должны работать даже если часть данных не загрузилась.
     document.getElementById('leaderboardBtn').onclick = ()=> location.href='leaderboard.html';
     document.getElementById('openLevelsMenu').onclick = ()=> location.href='levels-menu.html';
     document.getElementById('check').onclick = ()=>{
@@ -77,6 +63,21 @@ onAuthStateChanged(auth, async user => {
       else if(profile.role==='moderator') location.href='moderator.html';
       else err.textContent='Доступно только модераторам';
     };
+
+    try {
+      const usersSnap = await getDocs(query(collection(db,'users'), orderBy('points','desc')));
+      let rank = 0, place = '—', last = null, seen = 0;
+      usersSnap.forEach(d=>{
+        const u = d.data();
+        if(u.situation!=='verified' && u.situation!=='freezed') return;
+        seen++;
+        if(u.points !== last){ rank = seen; last = u.points; }
+        if(d.id===user.uid) place = String(rank);
+      });
+      placeEl.textContent = `Место: ${place}`;
+    } catch {
+      placeEl.textContent = `Место: —`;
+    }
 
     try {
       const msgSnap = await getDocs(query(collection(db,'moderator_messages'), where('playerId','==',user.uid)));
