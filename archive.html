@@ -8,6 +8,7 @@
   .folder{cursor:pointer}
   .path{margin:8px 0}
   .tag{font-size:11px;opacity:.8;padding:2px 6px;border:1px solid rgba(0,180,255,.35);border-radius:999px;margin-left:8px}
+  .hidden{display:none!important}
 </style>
 </head>
 <body>
@@ -17,22 +18,44 @@
 </div>
 <div class="hud" style="max-width:1200px;margin:40px auto;">
   <div class="page-header"><h1>Архив</h1><button id="back" class="btn-ghost">На главную</button></div>
+  <div class="top-actions">
+    <button id="openModeratorLog" class="btn-ghost hidden">Журнал действий модеров</button>
+  </div>
   <p id="status" style="color:#00ffff;">Загрузка...</p>
   <div id="archive"></div>
+</div>
+
+<div id="moderatorLogModal" class="dialog-backdrop">
+  <div class="dialog" style="width:min(980px,96vw);max-height:92vh;overflow:auto;">
+    <div class="page-header">
+      <h2 style="margin:0;">Журнал действий модеров</h2>
+      <button id="closeModeratorLog" class="btn-ghost">Закрыть</button>
+    </div>
+    <div id="moderatorLogList"></div>
+  </div>
 </div>
 
 <script type="module">
 import { auth, db, getNetworkErrorMessage } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import { collection, getDocs, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+import { collection, getDocs, doc, getDoc, limit, orderBy, query } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
 document.getElementById('back').onclick = ()=> location.href='main.html';
 const statusEl = document.getElementById('status');
+const openModeratorLogBtn = document.getElementById('openModeratorLog');
+const moderatorLogModal = document.getElementById('moderatorLogModal');
+const moderatorLogList = document.getElementById('moderatorLogList');
+
+function isElderRole(role){
+  const normalized = String(role ?? '').trim().toLowerCase();
+  return normalized === 'elder' || normalized === 'senior_moderator' || normalized === 'senior-moderator';
+}
 
 const state = {
   search: '',
   levels: new Map(), // level -> Map(player -> types)
   players: new Map(), // player -> Map(level -> types)
+  accruals: [],
   view: 'root',
   rootType: '', // level|player
   rootName: '',
@@ -82,6 +105,7 @@ function matchName(name, q){
 
 function breadcrumb(){
   if(state.view==='root') return 'Корень';
+  if(state.view==='accruals') return 'Папка: начисления';
   if(state.view==='levelPlayers') return `Уровень: ${state.rootName}`;
   if(state.view==='playerLevels') return `Игрок: ${state.rootName}`;
   if(state.view==='pairTypes') return `${state.rootType==='level'?'Уровень':'Игрок'}: ${state.rootName} → ${state.secondName}`;
@@ -113,7 +137,8 @@ function render(){
 
   if(state.view==='root'){
     if(!q){
-      content.innerHTML = '<p>Введите поиск, чтобы открыть папки архива.</p>';
+      content.innerHTML = '<div class="row folder" data-type="accruals">📁 <b>Начисления</b> <span class="tag">служебное</span></div><p class="small">Введите поиск, чтобы открыть папки уровней и игроков.</p>';
+      content.querySelector('[data-type="accruals"]').onclick = ()=>{ state.view='accruals'; render(); };
       return;
     }
 
@@ -125,12 +150,13 @@ function render(){
       return;
     }
 
-    let html='';
+    let html='<div class="row folder" data-type="accruals">📁 <b>Начисления</b> <span class="tag">служебное</span></div>';
     levelHits.forEach(name=> html += `<div class="row folder" data-type="level" data-name="${name}">📁 <b>${name}</b> <span class="tag">уровень</span></div>`);
     playerHits.forEach(name=> html += `<div class="row folder" data-type="player" data-name="${name}">📁 <b>${name}</b> <span class="tag">игрок</span></div>`);
     content.innerHTML = html;
 
     content.querySelectorAll('.folder').forEach(el=>el.onclick=()=>{
+      if(el.dataset.type==='accruals'){ state.view='accruals'; render(); return; }
       state.rootType = el.dataset.type;
       state.rootName = el.dataset.name;
       state.secondName = '';
@@ -138,6 +164,15 @@ function render(){
       state.view = state.rootType === 'level' ? 'levelPlayers' : 'playerLevels';
       render();
     });
+    return;
+  }
+
+  if(state.view==='accruals'){
+    const items = state.accruals
+      .filter(x=>!q || `${x.playerNick ?? ''} ${x.delta ?? ''} ${x.reason ?? ''} ${x.createdByNick ?? ''}`.toLowerCase().includes(q))
+      .sort((a,b)=>(b.createdAt?.seconds ?? 0)-(a.createdAt?.seconds ?? 0));
+    if(!items.length){ content.innerHTML='<p>Начислений не найдено.</p>'; return; }
+    content.innerHTML = items.map((x,i)=>`<div class="card"><b>#${i+1} · ${x.playerNick ?? 'Без ника'}</b><p>Δ очков: ${Number(x.delta ?? 0)}</p><p class="small">Причина: ${x.reason ?? 'manual_adjust'} · Кем: ${x.createdByNick ?? 'модератор'} · Когда: ${formatDate(x.createdAt)}</p></div>`).join('');
     return;
   }
 
@@ -180,11 +215,12 @@ function render(){
 }
 
 async function loadData(){
-  const [levelListSnap, ls, cs, ap] = await Promise.all([
+  const [levelListSnap, ls, cs, ap, adj] = await Promise.all([
     getDocs(collection(db,'levels')),
     getDocs(collection(db,'level_submissions')),
     getDocs(collection(db,'completion_submissions')),
-    getDocs(collection(db,'appeals'))
+    getDocs(collection(db,'appeals')),
+    getDocs(collection(db,'points_adjustments'))
   ]);
 
   const levelNameById = new Map();
@@ -228,6 +264,37 @@ async function loadData(){
     addToPair(levelName, player, 'appeal', x);
     addCommentIfNeeded(levelName, player, x);
   });
+  state.accruals = [];
+  adj.forEach(d=> state.accruals.push({ id:d.id, ...d.data() }));
+}
+
+function formatDate(ts){
+  return ts?.seconds ? new Date(ts.seconds * 1000).toLocaleString('ru-RU') : '—';
+}
+
+async function loadModeratorLog(){
+  moderatorLogList.innerHTML = '<p>Загрузка журнала…</p>';
+  try {
+    const snap = await getDocs(query(collection(db,'moderator_actions'), orderBy('createdAt','desc'), limit(200)));
+    if(snap.empty){
+      moderatorLogList.innerHTML = '<p>Журнал пока пуст.</p>';
+      return;
+    }
+    let html = '';
+    snap.forEach((d, i)=>{
+      const x = d.data();
+      html += `
+        <div class="card">
+          <b>#${i+1} · ${x.action ?? 'action'}</b>
+          <p class="small">${formatDate(x.createdAt)} · ${x.actorNick ?? '—'} (${x.actorRole ?? 'moderator'})</p>
+          <pre class="small" style="white-space:pre-wrap;margin:0;">${JSON.stringify(x.details ?? {}, null, 2)}</pre>
+        </div>
+      `;
+    });
+    moderatorLogList.innerHTML = html;
+  } catch (e) {
+    moderatorLogList.innerHTML = `<p>${getNetworkErrorMessage(e)}</p>`;
+  }
 }
 
 onAuthStateChanged(auth, async user=>{
@@ -237,6 +304,13 @@ onAuthStateChanged(auth, async user=>{
     const me = meSnap.exists() ? meSnap.data() : null;
     if(!me || me.situation!=='verified') return location.href='nick.html';
     if(me.role!=='moderator' && me.role!=='elder') return location.href='main.html';
+    if(isElderRole(me.role)){
+      openModeratorLogBtn.classList.remove('hidden');
+      openModeratorLogBtn.style.display = '';
+    } else {
+      openModeratorLogBtn.classList.add('hidden');
+      openModeratorLogBtn.style.display = 'none';
+    }
 
     await loadData();
     statusEl.textContent='';
@@ -245,6 +319,12 @@ onAuthStateChanged(auth, async user=>{
     statusEl.textContent = getNetworkErrorMessage(e);
   }
 });
+
+openModeratorLogBtn.onclick = async ()=>{
+  await loadModeratorLog();
+  moderatorLogModal.classList.add('open');
+};
+document.getElementById('closeModeratorLog').onclick = ()=> moderatorLogModal.classList.remove('open');
 </script>
 </body>
 </html>
