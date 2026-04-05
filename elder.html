@@ -29,7 +29,7 @@
 </div>
 
 <div id="playerModal" class="dialog-backdrop">
-  <div class="dialog">
+  <div class="dialog" style="width:min(980px,95vw)">
     <div class="page-header">
       <h2 id="playerModalTitle" style="margin:0;">Игрок</h2>
       <button id="closePlayerModal" class="btn-ghost">Закрыть</button>
@@ -43,7 +43,7 @@
 <script type="module">
 import { auth, db } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import { collection, query, orderBy, where, getDocs, doc, updateDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+import { collection, query, orderBy, where, getDocs, doc, updateDoc, getDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
 const statusEl = document.getElementById('status');
 const usersEl = document.getElementById('users');
@@ -58,6 +58,18 @@ function switchModalSection(name){
   document.getElementById('submissionsSection').classList.toggle('active', name==='submissions');
 }
 
+async function clearUserHistory(userId){
+  const [levelSubs, compSubs, appeals] = await Promise.all([
+    getDocs(query(collection(db,'level_submissions'), where('authorId','==',userId))),
+    getDocs(query(collection(db,'completion_submissions'), where('playerId','==',userId))),
+    getDocs(query(collection(db,'appeals'), where('playerId','==',userId)))
+  ]);
+
+  for (const d of levelSubs.docs) await deleteDoc(doc(db,'level_submissions',d.id));
+  for (const d of compSubs.docs) await deleteDoc(doc(db,'completion_submissions',d.id));
+  for (const d of appeals.docs) await deleteDoc(doc(db,'appeals',d.id));
+}
+
 async function openPlayerModal(userDoc){
   const { id, data } = userDoc;
   document.getElementById('playerModalTitle').textContent = data.nick ?? 'Игрок';
@@ -66,37 +78,54 @@ async function openPlayerModal(userDoc){
   const submissions = document.getElementById('submissionsSection');
 
   profile.innerHTML = `
+    <label class="small">Ник</label>
     <input id="modalNick" value="${data.nick ?? ''}" placeholder="Ник">
+    <label class="small">Почта</label>
     <input id="modalEmail" value="${data.email ?? ''}" placeholder="Почта" readonly>
+    <label class="small">Очки</label>
     <input id="modalPoints" type="number" value="${Number(data.points ?? 0)}" placeholder="Очки">
+    <label class="small">Роль</label>
     <select id="modalRole">
       <option value="player" ${data.role==='player' || !data.role ? 'selected' : ''}>player</option>
       <option value="moderator" ${data.role==='moderator' ? 'selected' : ''}>moderator</option>
       <option value="elder" ${data.role==='elder' ? 'selected' : ''}>elder</option>
     </select>
-    <select id="modalSituation">
-      <option value="verified" ${data.situation==='verified' ? 'selected' : ''}>verified</option>
-      <option value="not requested" ${data.situation==='not requested' ? 'selected' : ''}>not requested</option>
-    </select>
     <div class="top-actions">
-      <button id="saveProfile">Сохранить</button>
+      <button id="toggleVer">${data.situation==='verified' ? 'Снять верифку' : 'Верифицировать'}</button>
       <button id="openSubs">Отправки</button>
+      <button id="clearHistory" class="btn-danger">Очистить историю отправок</button>
     </div>
   `;
 
-  document.getElementById('saveProfile').onclick = async ()=>{
-    await updateDoc(doc(db,'users',id), {
-      nick: document.getElementById('modalNick').value.trim(),
-      points: Number(document.getElementById('modalPoints').value),
-      role: document.getElementById('modalRole').value,
-      situation: document.getElementById('modalSituation').value
-    });
-    document.getElementById('playerModalTitle').textContent = document.getElementById('modalNick').value.trim() || 'Игрок';
+  const nickInput = document.getElementById('modalNick');
+  const pointsInput = document.getElementById('modalPoints');
+  const roleSelect = document.getElementById('modalRole');
+
+  nickInput.onchange = async ()=>{
+    await updateDoc(doc(db,'users',id), { nick:nickInput.value.trim() });
+    document.getElementById('playerModalTitle').textContent = nickInput.value.trim() || 'Игрок';
+  };
+  pointsInput.onchange = async ()=>{
+    await updateDoc(doc(db,'users',id), { points:Number(pointsInput.value) });
+  };
+  roleSelect.onchange = async ()=>{
+    await updateDoc(doc(db,'users',id), { role:roleSelect.value });
   };
 
-  document.getElementById('openSubs').onclick = ()=>{
-    switchModalSection('submissions');
+  document.getElementById('toggleVer').onclick = async ()=>{
+    const newSit = data.situation==='verified' ? 'not requested' : 'verified';
+    await updateDoc(doc(db,'users',id), { situation:newSit });
+    data.situation = newSit;
+    document.getElementById('toggleVer').textContent = data.situation==='verified' ? 'Снять верифку' : 'Верифицировать';
   };
+
+  document.getElementById('clearHistory').onclick = async ()=>{
+    if(!confirm('Удалить всю историю отправок этого игрока?')) return;
+    await clearUserHistory(id);
+    alert('История очищена');
+  };
+
+  document.getElementById('openSubs').onclick = ()=>switchModalSection('submissions');
 
   const [levelSubs, compSubs, appealSubs] = await Promise.all([
     getDocs(query(collection(db,'level_submissions'), where('authorId','==',id))),

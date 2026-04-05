@@ -112,6 +112,60 @@ function calculateCompletionPoints(rank,size,k,s){
   return Math.round((s.maximumPoints * Math.exp(-s.rankDecayFactor * x) / Math.pow(Math.max(1, k), s.repeatPenaltyPower)) * 100) / 100;
 }
 
+async function placeLevelAtRank(levelId, targetRank){
+  const snap = await getDocs(query(collection(db,'levels'), orderBy('rank','asc')));
+  const levels = [];
+  snap.forEach(d=>{ const v=d.data(); if(v.status!=='archived') levels.push({id:d.id, ...v}); });
+  const moved = levels.find(x=>x.id===levelId);
+  if(!moved) return;
+
+  const without = levels.filter(x=>x.id!==levelId);
+  let index = Number(targetRank) - 1;
+  if(index < 0) index = 0;
+  if(index > without.length) index = without.length;
+  without.splice(index, 0, moved);
+
+  for(let i=0;i<without.length;i++){
+    const nextRank = i + 1;
+    if(Number(without[i].rank) !== nextRank){
+      await updateDoc(doc(db,'levels',without[i].id), { rank:nextRank });
+    }
+  }
+}
+
+async function recalcApprovedCompletions(){
+  const [levelsSnap, compsSnap] = await Promise.all([
+    getDocs(query(collection(db,'levels'), orderBy('rank','asc'))),
+    getDocs(query(collection(db,'completion_submissions'), where('status','==','approved')))
+  ]);
+  const rankByLevelId = new Map();
+  let quantity = 0;
+  levelsSnap.forEach(d=>{ const lv=d.data(); if(lv.status!=='archived'){ rankByLevelId.set(d.id, Number(lv.rank ?? 0)); quantity++; } });
+  quantity = Math.max(quantity, 2);
+
+  const byPlayer = new Map();
+  compsSnap.forEach(d=>{
+    const v = d.data();
+    if(!byPlayer.has(v.playerId)) byPlayer.set(v.playerId, []);
+    byPlayer.get(v.playerId).push({ id:d.id, ...v });
+  });
+
+  for(const [playerId, items] of byPlayer.entries()){
+    items.sort((a,b)=> (a.reviewedAt?.seconds ?? 0) - (b.reviewedAt?.seconds ?? 0));
+    let sum = 0;
+    for(let i=0;i<items.length;i++){
+      const it = items[i];
+      const rank = rankByLevelId.get(it.levelId) ?? Number(it.listRank ?? 1);
+      const earned = calculateCompletionPoints(rank, quantity, i + 1, scoringCfg);
+      sum += earned;
+      await updateDoc(doc(db,'completion_submissions',it.id), {
+        awardedPoints:earned, listRank:rank, listQuantity:quantity, scoreK:i+1
+      });
+    }
+    await updateDoc(doc(db,'users',playerId), { points: Math.round(sum * 100) / 100 });
+  }
+}
+
 async function loadScoring(){
   const snap = await getDoc(doc(db,'settings','scoring'));
   const s = snap.exists() ? snap.data() : {};
@@ -136,6 +190,7 @@ document.getElementById('saveSettings').onclick = async ()=>{
   }, { merge:true });
   document.getElementById('settingsMsg').textContent = 'Параметры сохранены.';
   await loadScoring();
+  await recalcApprovedCompletions();
   await renderLevels();
 };
 
@@ -171,19 +226,23 @@ function openLevelModal(lv){
     </div>
   `;
   document.getElementById('saveLevel').onclick = async ()=>{
+    const newRank = Number(document.getElementById('modalLevelRank').value);
     await updateDoc(doc(db,'levels',lv.id), {
-      rank:Number(document.getElementById('modalLevelRank').value),
+      rank:newRank,
       link:document.getElementById('modalLevelLink').value.trim(),
       text:document.getElementById('modalLevelText').value.trim(),
       fileUrl:document.getElementById('modalLevelFile').value.trim(),
       updatedBy: currentElder.uid, updatedAt: serverTimestamp()
     });
+    await placeLevelAtRank(lv.id, newRank);
+    await recalcApprovedCompletions();
     levelModal.classList.remove('open');
     await renderLevels();
   };
   document.getElementById('deleteLevel').onclick = async ()=>{
     if(!confirm('Удалить уровень?')) return;
     await deleteDoc(doc(db,'levels',lv.id));
+    await recalcApprovedCompletions();
     levelModal.classList.remove('open');
     await renderLevels();
   };
@@ -248,7 +307,8 @@ function openSubmissionDetail(item){
     document.getElementById('approve').onclick = async ()=>{
       const rank = Number(document.getElementById('detailRank').value);
       if(!rank){ alert('Укажи место'); return; }
-      await addDoc(collection(db,'levels'), { link:d.link, text:d.text ?? '', fileUrl:d.fileUrl ?? '', rank, addedBy:currentElder.uid, addedByNick:currentElder.nick ?? 'elder', createdAt:serverTimestamp(), sourceSubmissionId:item.id, status:'active' });
+      const ref = await addDoc(collection(db,'levels'), { link:d.link, text:d.text ?? '', fileUrl:d.fileUrl ?? '', rank, addedBy:currentElder.uid, addedByNick:currentElder.nick ?? 'elder', createdAt:serverTimestamp(), sourceSubmissionId:item.id, status:'active' });
+      await placeLevelAtRank(ref.id, rank);
       await updateDoc(doc(db,'level_submissions',item.id), { status:'approved', note:document.getElementById('detailNote').value.trim(), reviewedBy:currentElder.uid, reviewedAt:serverTimestamp(), finalRank:rank });
       await loadSubmissions();
       await renderLevels();
@@ -259,11 +319,13 @@ function openSubmissionDetail(item){
       await loadSubmissions(); detail.innerHTML='';
     };
   } else if(item.type==='completion' && d.status==='pending'){
-    const opts = levelsCache.map(l=>`<option value="${Number(l.rank ?? 0)}">#${l.rank} · ${String(l.text ?? '').slice(0,60)}</option>`).join('');
+    const opts = levelsCache.map(l=>`<option value="${l.id}">#${l.rank} · ${String(l.text ?? '').slice(0,60)}</option>`).join('');
     actions.innerHTML = `<select id="detailRank"><option value="">Выбери уровень</option>${opts}</select><button id="approve">Одобрить</button><button id="reject" class="btn-danger">Отклонить</button>`;
     document.getElementById('approve').onclick = async ()=>{
-      const rank = Number(document.getElementById('detailRank').value);
-      if(!rank){ alert('Выбери уровень'); return; }
+      const levelId = document.getElementById('detailRank').value;
+      if(!levelId){ alert('Выбери уровень'); return; }
+      const level = levelsCache.find(x=>x.id===levelId);
+      const rank = Number(level?.rank ?? 1);
       const userRef = doc(db,'users',d.playerId);
       const userSnap = await getDoc(userRef);
       const userData = userSnap.exists() ? userSnap.data() : null;
@@ -272,7 +334,8 @@ function openSubmissionDetail(item){
       let approvedCount = 0; comps.forEach(x=>{ if(x.data().status==='approved') approvedCount++; });
       const earned = calculateCompletionPoints(rank, Math.max(2, levelsCache.length), approvedCount + 1, scoringCfg);
       await updateDoc(userRef, { points:Number(userData.points ?? 0) + earned });
-      await updateDoc(doc(db,'completion_submissions',item.id), { status:'approved', note:document.getElementById('detailNote').value.trim(), reviewedBy:currentElder.uid, reviewedAt:serverTimestamp(), awardedPoints:earned, listRank:rank, listQuantity:Math.max(2, levelsCache.length), scoreK:approvedCount+1 });
+      await updateDoc(doc(db,'completion_submissions',item.id), { status:'approved', note:document.getElementById('detailNote').value.trim(), reviewedBy:currentElder.uid, reviewedAt:serverTimestamp(), awardedPoints:earned, listRank:rank, listQuantity:Math.max(2, levelsCache.length), scoreK:approvedCount+1, levelId });
+      await recalcApprovedCompletions();
       await loadSubmissions(); detail.innerHTML='';
     };
     document.getElementById('reject').onclick = async ()=>{
