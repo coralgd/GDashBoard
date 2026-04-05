@@ -16,7 +16,7 @@
   <p id="userPlace"></p>
 
   <div class="top-actions" style="justify-content:center;">
-    <button id="leaderboardBtn" class="btn-hero">Лидерборд и лист</button>
+    <button id="leaderboardBtn" class="btn-hero">Лидерборд</button>
     <button id="openLevelsMenu" class="btn-hero">Меню уровней</button>
     <button id="check" class="btn-hero">Модерация</button>
   </div>
@@ -63,7 +63,7 @@ onAuthStateChanged(auth, async user => {
     if(!placeEl.textContent) placeEl.textContent='Место: —';
 
     document.getElementById('leaderboardBtn').onclick = ()=> location.href='leaderboard.html';
-    document.getElementById('openLevelsMenu').onclick = ()=> location.href='leaderboard.html#menu';
+    document.getElementById('openLevelsMenu').onclick = ()=> location.href='levels-menu.html';
     document.getElementById('check').onclick = ()=>{
       if(profile.role==='moderator') location.href='moderator.html';
       else if(profile.role==='elder') location.href='elder.html';

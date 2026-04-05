@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>Меню уровней (перенесено)</title>
+<title>Меню уровней</title>
 <link rel="stylesheet" href="hud.css">
 </head>
 <body>
@@ -11,16 +11,21 @@
     <h1 style="margin:0;">Меню уровней</h1>
     <button id="back" class="btn-ghost">Назад на главную</button>
   </div>
-  <p id="status" style="color:#00ffff;">Меню перенесено на страницу листа.</p>
+  <p id="status" style="color:#00ffff;">Выбери действие.</p>
   <div class="top-actions">
-    <button id="goNewMenu" class="btn-hero">Открыть меню на странице листа</button>
+    <button id="goSubmitLevel" class="btn-hero">Отправить уровень</button>
+    <button id="goSubmitCompletion" class="btn-hero">Отправить прохождение</button>
+    <button id="goSubmitAppeal" class="btn-hero">Отправить апелляцию</button>
+    <button id="goMySubmissions" class="btn-hero">Мои отправки</button>
   </div>
-
 </div>
 
 <script type="module">
-document.getElementById('goNewMenu').onclick = ()=> location.href='leaderboard.html#menu';
-back.onclick = ()=> location.href='main.html';
+document.getElementById('goSubmitLevel').onclick = ()=> location.href='submit-level.html';
+document.getElementById('goSubmitCompletion').onclick = ()=> location.href='submit-completion.html';
+document.getElementById('goSubmitAppeal').onclick = ()=> location.href='submit-appeal.html';
+document.getElementById('goMySubmissions').onclick = ()=> location.href='my-submissions.html';
+document.getElementById('back').onclick = ()=> location.href='main.html';
 </script>
 </body>
 </html>
