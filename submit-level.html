@@ -21,7 +21,7 @@
 </div>
 
 <script type="module">
-import { auth, db } from './firebase.js';
+import { auth, db, getNetworkErrorMessage } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
 import { doc, getDoc, addDoc, collection, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
@@ -30,10 +30,15 @@ let profile = null;
 
 onAuthStateChanged(auth, async u=>{
   if(!u) return location.href='index.html';
-  user = u;
-  const snap = await getDoc(doc(db,'users',u.uid));
-  profile = snap.exists() ? snap.data() : null;
-  if(!profile || profile.situation!=='verified') return location.href='nick.html';
+  try {
+    user = u;
+    const snap = await getDoc(doc(db,'users',u.uid));
+    profile = snap.exists() ? snap.data() : null;
+    if(!profile || profile.situation!=='verified') return location.href='nick.html';
+  } catch (e) {
+    console.error(e);
+    document.getElementById('msg').textContent = getNetworkErrorMessage(e);
+  }
 });
 
 send.onclick = async ()=>{
