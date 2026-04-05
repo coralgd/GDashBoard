@@ -2,55 +2,95 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>Отправка уровня</title>
+<title>SpinList — Отправка уровня</title>
 <link rel="stylesheet" href="hud.css">
 </head>
 <body>
-<div class="hud" style="max-width:700px;margin:50px auto;">
+<div class="brand-hero">
+  <img src="spinlist-logo.svg" alt="SpinList logo">
+  <div class="brand-title">SPINLIST</div>
+</div>
+<div class="hud" style="max-width:760px;margin:50px auto;">
   <h1>Отправить уровень в лист</h1>
   <div class="card">
-    <input id="link" placeholder="Ссылка на уровень" style="width:100%"><br><br>
-    <textarea id="text" placeholder="Описание" style="width:100%;min-height:120px"></textarea><br><br>
-    <input id="fileUrl" placeholder="Ссылка на файл (опционально)" style="width:100%"><br><br>
+    <label>К какому уровню/позиции относится предложение (опц.)</label>
     <div class="top-actions">
-      <button id="send">Отправить</button>
-      <button id="back">Назад</button>
+      <button id="pickLevel" class="btn-ghost">Выбрать уровень из листа</button>
+      <span id="pickedLevel" class="small">Не выбран</span>
     </div>
+
+    <input id="link" placeholder="Ссылка на уровень"><br><br>
+    <textarea id="text" placeholder="Описание" style="min-height:120px"></textarea><br><br>
+    <input id="fileUrl" placeholder="Ссылка на файл (опционально)"><br><br>
+
+    <label class="small">Сослаться на прошлую отправку (опц.)</label>
+    <select id="ref"><option value="">Без ссылки</option></select><br><br>
+
+    <div class="top-actions"><button id="send">Отправить</button><button id="back">Назад</button></div>
   </div>
   <p id="msg" style="color:#00ffff"></p>
 </div>
 
-<script type="module">
-import { auth, db } from './firebase.js';
-import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import { doc, getDoc, addDoc, collection, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+<div id="modal" class="dialog-backdrop"><div class="dialog"><div class="page-header"><h2>Выберите уровень</h2><button id="closeModal" class="btn-ghost">Закрыть</button></div><input id="levelSearch" placeholder="Поиск уровня"><div id="levelList"></div></div></div>
 
-let user = null;
-let profile = null;
+<script type="module">
+import { auth, db, getNetworkErrorMessage } from './firebase.js';
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
+import { doc, getDoc, addDoc, collection, serverTimestamp, getDocs, query, where, orderBy } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+
+let user=null, profile=null, levels=[], selectedLevel=null;
+
+async function loadRefs(uid){
+  const sel=document.getElementById('ref');
+  const snap=await getDocs(query(collection(db,'level_submissions'), where('authorId','==',uid)));
+  const items=[]; snap.forEach(d=>items.push({id:d.id,...d.data()}));
+  items.sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
+  items.slice(0,50).forEach(x=>{const o=document.createElement('option');o.value=x.id;o.textContent=`[${x.status ?? 'pending'}] ${String(x.text ?? '').slice(0,80)||'Без текста'}`;sel.appendChild(o);});
+}
+
+function renderLevels(){
+  const q=document.getElementById('levelSearch').value.trim().toLowerCase();
+  const box=document.getElementById('levelList');
+  box.innerHTML='';
+  const filtered=levels.filter(l=>`${l.rank ?? ''} ${l.text ?? ''} ${l.link ?? ''}`.toLowerCase().includes(q));
+  if(!filtered.length){ box.innerHTML='<p>Уровни не найдены.</p>'; return; }
+  filtered.forEach(l=>{const row=document.createElement('div');row.className='row list-item clickable';row.innerHTML=`<div>${l.rank ?? '—'}</div><div>${l.text ?? 'Без названия'}</div><div>Выбрать</div>`;row.onclick=()=>{selectedLevel=l;document.getElementById('pickedLevel').textContent=`#${l.rank ?? '—'} · ${l.text ?? 'Без названия'}`;document.getElementById('modal').classList.remove('open');};box.appendChild(row);});
+}
 
 onAuthStateChanged(auth, async u=>{
   if(!u) return location.href='index.html';
-  user = u;
-  const snap = await getDoc(doc(db,'users',u.uid));
-  profile = snap.exists() ? snap.data() : null;
-  if(!profile || profile.situation!=='verified') return location.href='nick.html';
+  try {
+    user=u; const snap=await getDoc(doc(db,'users',u.uid)); profile=snap.exists()?snap.data():null;
+    if(!profile||profile.situation!=='verified') return location.href='nick.html';
+    await loadRefs(u.uid);
+    const ls=await getDocs(query(collection(db,'levels'), orderBy('rank','asc')));
+    levels=[]; ls.forEach(d=>{const l=d.data(); if(l.status!=='archived') levels.push({id:d.id,...l});});
+  } catch(e){ document.getElementById('msg').textContent=getNetworkErrorMessage(e); }
 });
 
-send.onclick = async ()=>{
-  const link = document.getElementById('link').value.trim();
-  const text = document.getElementById('text').value.trim();
-  const fileUrl = document.getElementById('fileUrl').value.trim();
-  const msg = document.getElementById('msg');
-  if(!link || !text){ msg.textContent='Нужны ссылка и текст'; return; }
+document.getElementById('pickLevel').onclick=()=>{ document.getElementById('modal').classList.add('open'); renderLevels(); };
+document.getElementById('closeModal').onclick=()=>document.getElementById('modal').classList.remove('open');
+document.getElementById('levelSearch').oninput=renderLevels;
 
-  await addDoc(collection(db,'level_submissions'), {
-    authorId:user.uid, nick:profile.nick ?? 'Без ника', link, text, fileUrl,
-    status:'pending', note:'', createdAt:serverTimestamp()
-  });
-  msg.textContent='Заявка отправлена модераторам.';
+document.getElementById('send').onclick=async()=>{
+  const link=document.getElementById('link').value.trim();
+  const text=document.getElementById('text').value.trim();
+  const fileUrl=document.getElementById('fileUrl').value.trim();
+  const referenceSubmissionId=document.getElementById('ref').value||'';
+  const msg=document.getElementById('msg');
+  if(!link||!text){ msg.textContent='Нужны ссылка и текст'; return; }
+
+  try{
+    await addDoc(collection(db,'level_submissions'),{
+      authorId:user.uid,nick:profile.nick ?? 'Без ника',link,text,fileUrl,referenceSubmissionId,
+      relatedLevelId:selectedLevel?.id ?? '', relatedLevelRank:Number(selectedLevel?.rank ?? 0) || null,
+      status:'pending',note:'',createdAt:serverTimestamp()
+    });
+    msg.textContent='Заявка отправлена модераторам.';
+  }catch(e){ msg.textContent=getNetworkErrorMessage(e); }
 };
 
-back.onclick = ()=> location.href='main.html';
+document.getElementById('back').onclick=()=>location.href='main.html';
 </script>
 </body>
 </html>
