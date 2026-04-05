@@ -1,94 +1,10 @@
-<!doctype html>
-<html lang="ru">
-<head>
-<meta charset="UTF-8">
-<title>Панель модератора</title>
-<link rel="stylesheet" href="hud.css">
-</head>
-<body>
-<div class="hud" style="max-width:1020px;margin:40px auto;">
-  <div class="page-header">
-    <h1 style="margin:0;">Панель модератора</h1>
-    <button id="backMain" class="btn-ghost">На главную</button>
-  </div>
-  <p id="status" style="color:#00ffff;">Загрузка...</p>
-
-  <div class="top-actions">
-    <button id="goModLevels" class="btn-hero">Меню уровней модератора</button>
-  </div>
-
-  <h2>Верифицированные игроки</h2>
-  <p class="small">Здесь можно быстро корректировать очки обычных игроков (без ролей модерации).</p>
-  <div id="players"></div>
-</div>
+<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8"><title>Панель модератора</title><link rel="stylesheet" href="hud.css"></head><body><div class="hud"><div class="page-header"><h1>Панель модератора</h1><button id="back" class="btn-ghost">На главную</button></div><p id="status" style="color:#00ffff">Загрузка...</p><div class="top-actions"><button id="goLevels">Меню уровней модератора</button></div><div id="users"></div></div>
 <script type="module">
 import { auth, db, getNetworkErrorMessage } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
 import { collection, doc, getDoc, getDocs, query, updateDoc, where } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
-
-const statusEl = document.getElementById('status');
-const playersEl = document.getElementById('players');
-document.getElementById('backMain').onclick = ()=> location.href='main.html';
-document.getElementById('goModLevels').onclick = ()=> location.href='moderator-levels.html';
-
-async function renderPlayers(){
-  playersEl.innerHTML = 'Загрузка игроков...';
-  const snap = await getDocs(query(collection(db,'users'), where('situation','==','verified')));
-  const users = [];
-  snap.forEach(d => {
-    const u = d.data();
-    if(u.role === 'moderator' || u.role === 'elder') return;
-    users.push({ id:d.id, ...u });
-  });
-  users.sort((a,b) => String(a.nick ?? '').localeCompare(String(b.nick ?? ''), 'ru'));
-
-  playersEl.innerHTML = '';
-  if(!users.length){ playersEl.innerHTML = '<p>Нет подходящих игроков.</p>'; return; }
-
-  users.forEach(u => {
-    const row = document.createElement('div');
-    row.className = 'list-item';
-
-    const nick = document.createElement('b');
-    nick.textContent = u.nick ?? 'Без ника';
-    const email = document.createElement('p');
-    email.className = 'small';
-    email.textContent = u.email ?? '—';
-    const input = document.createElement('input');
-    input.type = 'number';
-    input.value = String(Number(u.points ?? 0));
-    const save = document.createElement('button');
-    save.textContent = 'Сохранить очки';
-
-    save.onclick = async ()=>{
-      const value = Number(input.value);
-      if(Number.isNaN(value)){ alert('Некорректное число'); return; }
-      save.disabled = true;
-      await updateDoc(doc(db,'users',u.id), { points:value });
-      save.textContent = 'Сохранено';
-      setTimeout(()=>{ save.textContent = 'Сохранить очки'; save.disabled = false; }, 700);
-    };
-
-    row.append(nick, email, input, save);
-    playersEl.appendChild(row);
-  });
-  users.sort((a,b) => String(a.nick ?? '').localeCompare(String(b.nick ?? ''), 'ru'));
-
-onAuthStateChanged(auth, async user=>{
-  if(!user) return location.href='index.html';
-  try {
-    const meSnap = await getDoc(doc(db,'users',user.uid));
-    const me = meSnap.exists() ? meSnap.data() : null;
-    if(!me || me.situation !== 'verified') return location.href='nick.html';
-    if(me.role !== 'moderator' && me.role !== 'elder') return location.href='main.html';
-
-    await renderPlayers();
-    statusEl.textContent = '';
-  } catch (error) {
-    console.error(error);
-    statusEl.textContent = getNetworkErrorMessage(error);
-  }
-});
-</script>
-</body>
-</html>
+const status=document.getElementById('status');const users=document.getElementById('users');
+document.getElementById('back').onclick=()=>location.href='main.html';document.getElementById('goLevels').onclick=()=>location.href='moderator-levels.html';
+async function loadUsers(){users.innerHTML='Загрузка...';const snap=await getDocs(query(collection(db,'users'),where('situation','==','verified')));const arr=[];snap.forEach(d=>{const u=d.data();if(u.role==='moderator'||u.role==='elder')return;arr.push({id:d.id,...u});});arr.sort((a,b)=>String(a.nick??'').localeCompare(String(b.nick??''),'ru'));users.innerHTML='';if(!arr.length){users.innerHTML='<p>Игроков нет.</p>';return;}arr.forEach(u=>{const card=document.createElement('div');card.className='list-item';card.innerHTML=`<b>${u.nick??'Без ника'}</b><p class='small'>${u.email??'—'}</p><input type='number' value='${Number(u.points??0)}'><button>Сохранить очки</button>`;card.querySelector('button').onclick=async()=>{const points=Number(card.querySelector('input').value);if(Number.isNaN(points))return alert('Некорректное число');await updateDoc(doc(db,'users',u.id),{points});};users.appendChild(card);});}
+onAuthStateChanged(auth, async u=>{if(!u)return location.href='index.html';try{const me=await getDoc(doc(db,'users',u.uid));const m=me.exists()?me.data():null;if(!m||m.situation!=='verified') return location.href='nick.html';if(m.role!=='moderator'&&m.role!=='elder') return location.href='main.html';await loadUsers();status.textContent='';}catch(e){status.textContent=getNetworkErrorMessage(e);}});
+</script></body></html>

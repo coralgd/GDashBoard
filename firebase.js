@@ -12,25 +12,17 @@ export const app = initializeApp({
 });
 
 export const auth = getAuth(app);
-let dbInstance = null;
+let dbInst;
 try {
-  dbInstance = initializeFirestore(app, {
-    experimentalForceLongPolling: true,
-    useFetchStreams: false
-  });
-} catch (e) {
-  console.warn('Fallback to default Firestore transport:', e?.message || e);
-  dbInstance = getFirestore(app);
+  dbInst = initializeFirestore(app, { experimentalForceLongPolling: true, useFetchStreams: false });
+} catch {
+  dbInst = getFirestore(app);
 }
-export const db = dbInstance;
+export const db = dbInst;
 
 export function getNetworkErrorMessage(error){
-  const code = error?.code || '';
-  if(code.includes('unavailable') || code.includes('deadline-exceeded') || code.includes('failed-precondition')){
-    return 'Нет связи с сервером Firebase. Проверь интернет, VPN/прокси и правила Firestore.';
-  }
-  if(code.includes('permission-denied')){
-    return 'Доступ запрещён правилами Firestore. Проверь роль, верификацию и security rules.';
-  }
-  return error?.message || 'Неизвестная ошибка подключения к Firebase.';
+  const code = String(error?.code ?? '');
+  if(code.includes('permission-denied')) return 'Нет доступа. Проверь роль, верификацию и правила Firestore.';
+  if(code.includes('unavailable') || code.includes('deadline-exceeded') || code.includes('failed-precondition')) return 'Нет связи с Firebase. Проверь интернет/VPN/прокси.';
+  return error?.message || 'Ошибка Firebase.';
 }
