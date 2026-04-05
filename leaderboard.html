@@ -249,7 +249,7 @@ onAuthStateChanged(auth, async user => {
 
     usersSnap.forEach(d => {
       const u = d.data();
-      if(u.situation !== 'verified') return;
+      if(u.situation !== 'verified' && u.situation !== 'freezed') return;
       const points = Number(u.points ?? 0);
       seen += 1;
       if(lastPoints !== points){ rank = seen; lastPoints = points; }

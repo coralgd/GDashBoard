@@ -12,8 +12,8 @@
 </div>
 
 <div class="hud" style="max-width:500px;margin:80px auto;text-align:center;">
-  <h1>Выберите ник</h1>
-  <input id="nickInput" type="text" placeholder="Введите ник">
+  <h1>Выбери ник</h1>
+  <input id="nickInput" type="text" placeholder="Введи ник">
   <button id="submitBtn">Отправить</button>
   <p id="error" style="color:red"></p>
 </div>
@@ -44,7 +44,7 @@ onAuthStateChanged(auth, async (user) => {
 
     if (snap.exists()) {
       const data = snap.data();
-      if (data.accountFrozen) {
+      if (data.accountFrozen || data.situation === 'freezed') {
         await signOut(auth);
         error.textContent = 'Аккаунт заморожен. Вход запрещен.';
         return;

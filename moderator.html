@@ -224,7 +224,7 @@ function openLevelModal(level){
 
 async function loadPlayers(){
   const [usersSnap] = await Promise.all([
-    getDocs(query(collection(db,'users'), where('situation','==','verified')))
+    getDocs(query(collection(db,'users'), where('situation','in',['verified','freezed'])))
   ]);
 
   const users = [];

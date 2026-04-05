@@ -126,7 +126,7 @@ function render(){
       <span class="small">${breadcrumb()}</span>
     </div>
     <label>Поиск (в корне ищет только папки типа «уровень» и «игрок»)</label>
-    <input id="search" placeholder="Введите имя игрока или название уровня" value="${state.search.replace(/"/g,'&quot;')}" />
+    <input id="search" placeholder="Введи имя игрока или название уровня" value="${state.search.replace(/"/g,'&quot;')}" />
     <div id="content" style="margin-top:10px"></div>
   `;
 
@@ -137,7 +137,7 @@ function render(){
 
   if(state.view==='root'){
     if(!q){
-      content.innerHTML = '<div class="row folder" data-type="accruals">📁 <b>Начисления</b> <span class="tag">служебное</span></div><p class="small">Введите поиск, чтобы открыть папки уровней и игроков.</p>';
+      content.innerHTML = '<div class="row folder" data-type="accruals">📁 <b>Начисления</b> <span class="tag">служебное</span></div><p class="small">Введи поиск, чтобы открыть папки уровней и игроков.</p>';
       content.querySelector('[data-type="accruals"]').onclick = ()=>{ state.view='accruals'; render(); };
       return;
     }

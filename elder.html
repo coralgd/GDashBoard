@@ -104,7 +104,7 @@
 
     <div class="submission-layout">
       <div class="submission-list" id="submissionList"></div>
-      <div id="submissionDetail" class="card"><p class="small">Выберите отправку слева.</p></div>
+      <div id="submissionDetail" class="card"><p class="small">Выбери отправку слева.</p></div>
     </div>
 
     <div class="row small"><div>Дата</div><div>Описание</div><div>Тип/Статус</div></div>
@@ -294,7 +294,7 @@ async function loadData(){
   let lastPoints = null;
   usersSnap.forEach(d=>{
     const u = d.data();
-    if(u.situation !== 'verified') return;
+    if(u.situation !== 'verified' && u.situation !== 'freezed') return;
     const points = Number(u.points ?? 0);
     seen += 1;
     if(lastPoints !== points){ rank = seen; lastPoints = points; }
@@ -365,7 +365,7 @@ async function openPlayerModal(playerId){
   const approved = completions.filter(x=>x.status==='approved');
 
   document.getElementById('playerTitle').textContent = `Игрок: ${player.nick ?? 'Без ника'}`;
-  const verNegative = player.situation === 'verified';
+  const verNegative = player.situation === 'verified' || player.situation === 'freezed';
 
   document.getElementById('playerBody').innerHTML = `
     <div class="card">
@@ -449,7 +449,7 @@ async function openPlayerModal(playerId){
   };
 
   document.getElementById('toggleVerify').onclick = async ()=>{
-    const newSituation = player.situation === 'verified' ? 'not requested' : 'verified';
+    const newSituation = (player.situation === 'verified' || player.situation === 'freezed') ? 'not requested' : 'verified';
     await updateDoc(doc(db,'users',playerId), { situation:newSituation });
     await logModeratorAction('toggle_player_verify', { playerId, situation: newSituation });
     await loadData();
@@ -468,7 +468,7 @@ async function openPlayerModal(playerId){
 
   document.getElementById('toggleFreeze').onclick = async ()=>{
     const nextFrozen = !Boolean(player.accountFrozen);
-    await updateDoc(doc(db,'users',playerId), { accountFrozen: nextFrozen });
+    await updateDoc(doc(db,'users',playerId), { accountFrozen: nextFrozen, situation: nextFrozen ? 'freezed' : 'verified' });
     await logModeratorAction('toggle_account_freeze', { playerId, frozen: nextFrozen });
     await loadData();
     renderMainList();
@@ -583,7 +583,7 @@ function renderSubmissionList(){
 
   if(!arr.length){
     submissionListEl.innerHTML = '<p>Отправок не найдено.</p>';
-    submissionDetail.innerHTML = '<p class="small">Выберите отправку слева.</p>';
+    submissionDetail.innerHTML = '<p class="small">Выбери отправку слева.</p>';
     return;
   }
 
@@ -689,7 +689,7 @@ async function applySubmissionVerdict(item, verdict){
 function renderSubmissionDetail(submissionId){
   const item = submissions.find(x=>x.id===submissionId);
   if(!item){
-    submissionDetail.innerHTML = '<p class="small">Выберите отправку слева.</p>';
+    submissionDetail.innerHTML = '<p class="small">Выбери отправку слева.</p>';
     return;
   }
 

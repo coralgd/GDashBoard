@@ -44,8 +44,8 @@ onAuthStateChanged(auth, async user => {
   try {
     const userSnap = await getDoc(doc(db,'users',user.uid));
     const profile = userSnap.exists() ? userSnap.data() : null;
-    if(!profile || profile.situation !== 'verified') return location.href='nick.html';
-    if(profile.accountFrozen){
+    if(!profile || (profile.situation !== 'verified' && profile.situation !== 'freezed')) return location.href='nick.html';
+    if(profile.accountFrozen || profile.situation === 'freezed'){
       await signOut(auth);
       err.textContent='Аккаунт заморожен. Вход запрещен.';
       return;
@@ -58,7 +58,7 @@ onAuthStateChanged(auth, async user => {
     let rank = 0, place = '—', last = null, seen = 0;
     usersSnap.forEach(d=>{
       const u = d.data();
-      if(u.situation!=='verified') return;
+      if(u.situation!=='verified' && u.situation!=='freezed') return;
       seen++;
       if(u.points !== last){ rank = seen; last = u.points; }
       if(d.id===user.uid) place = String(rank);
