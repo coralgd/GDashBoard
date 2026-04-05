@@ -117,14 +117,15 @@ function renderPlayers(users){
         <p><b>Очки:</b> ${Number(u.points ?? 0)}</p>
         <p><b>Место в топе:</b> ${u.rank}</p>
         <p><b>Подтвержденных прохождений:</b> ${mine.length}</p>
-        <table class="modal-table"><thead><tr><th>#</th><th>Уровень</th><th>Очки</th></tr></thead><tbody>
+        <table class="modal-table"><thead><tr><th>#</th><th>Уровень</th><th>Что отправил</th><th>Очки</th><th>Статус/коммент</th></tr></thead><tbody>
       `;
       mine
         .sort((a,b)=>(a.reviewedAt?.seconds ?? 0) - (b.reviewedAt?.seconds ?? 0))
         .forEach((c, idx)=>{
           const level = c.levelId ? levelsById.get(c.levelId) : null;
           const levelName = level?.text ?? c.text ?? 'Уровень';
-          html += `<tr><td>${idx+1}</td><td>${levelName}</td><td>${Number(c.awardedPoints ?? 0)}</td></tr>`;
+          const sent = `${c.text ?? ''} ${c.link ? ' | '+c.link : ''} ${c.fileUrl ? ' | файл: '+c.fileUrl : ''}`.trim();
+          html += `<tr><td>${idx+1}</td><td>${levelName}</td><td>${sent || '—'}</td><td>${Number(c.awardedPoints ?? 0)}</td><td>${c.status ?? 'approved'} / ${c.note ?? '—'}</td></tr>`;
         });
       html += '</tbody></table>';
       openModal(`Игрок: ${u.nick ?? 'Без ника'}`, html);

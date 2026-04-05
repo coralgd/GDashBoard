@@ -13,18 +13,20 @@
 </style>
 </head>
 <body>
-<div class="hud" style="max-width:1000px;margin:40px auto;">
+<div class="hud" style="max-width:1100px;margin:40px auto;">
   <h1>Панель модератора</h1>
   <p id="status" style="color:#00ffff;">Загрузка...</p>
 
   <div class="menu-grid">
     <button data-tab="levels">Заявки уровней</button>
     <button data-tab="completions">Заявки прохождений</button>
+    <button data-tab="archive">Архив обработанных</button>
     <button data-tab="users">Аккаунты</button>
   </div>
 
   <div id="levels" class="panel active"></div>
   <div id="completions" class="panel"></div>
+  <div id="archive" class="panel"></div>
   <div id="users" class="panel"></div>
 </div>
 
@@ -106,6 +108,7 @@ async function loadPendingLevels(){
       <b>${s.nick ?? 'Без ника'}</b>
       <a href="${s.link ?? '#'}" target="_blank">Ссылка</a>
       <p>${s.text ?? ''}</p>
+      <p class="small">ref: ${s.referenceSubmissionId ?? '—'}</p>
       <input class="note" placeholder="Комментарий">
       <input class="rank" type="number" min="1" placeholder="Место">
       <div class="top-actions"><button class="ok">Одобрить</button><button class="no btn-danger">Отклонить</button></div>
@@ -117,11 +120,13 @@ async function loadPendingLevels(){
       await addDoc(collection(db,'levels'),{link:s.link ?? '',text:s.text ?? '',fileUrl:s.fileUrl ?? '',rank,status:'active',addedBy:me.uid,addedByNick:me.nick ?? 'moderator',createdAt:serverTimestamp(),sourceSubmissionId:d.id});
       await updateDoc(doc(db,'level_submissions',d.id),{status:'approved',note:row.querySelector('.note').value.trim(),reviewedBy:me.uid,reviewedAt:serverTimestamp(),finalRank:rank});
       row.remove();
+      await loadArchive();
     };
 
     row.querySelector('.no').onclick = async ()=>{
       await updateDoc(doc(db,'level_submissions',d.id),{status:'rejected',note:row.querySelector('.note').value.trim() || 'Отклонено',reviewedBy:me.uid,reviewedAt:serverTimestamp()});
       row.remove();
+      await loadArchive();
     };
     box.appendChild(row);
   });
@@ -142,6 +147,7 @@ async function loadPendingCompletions(){
       <b>${s.nick ?? 'Без ника'}</b>
       <a href="${s.link ?? '#'}" target="_blank">Доказательство</a>
       <p>${s.text ?? ''}</p>
+      <p class="small">ref: ${s.referenceSubmissionId ?? '—'}</p>
       <input class="note" placeholder="Комментарий">
       <div class="top-actions"><button class="ok">Одобрить</button><button class="no btn-danger">Отклонить</button></div>
     `;
@@ -149,15 +155,49 @@ async function loadPendingCompletions(){
     row.querySelector('.ok').onclick = async ()=>{
       await updateDoc(doc(db,'completion_submissions',d.id),{status:'approved',note:row.querySelector('.note').value.trim(),reviewedBy:me.uid,reviewedAt:serverTimestamp()});
       row.remove();
+      await loadArchive();
     };
 
     row.querySelector('.no').onclick = async ()=>{
       await updateDoc(doc(db,'completion_submissions',d.id),{status:'rejected',note:row.querySelector('.note').value.trim() || 'Отклонено',reviewedBy:me.uid,reviewedAt:serverTimestamp()});
       row.remove();
+      await loadArchive();
     };
 
     box.appendChild(row);
   });
+}
+
+function renderArchiveSection(title, items){
+  let html = `<h3>${title}</h3>`;
+  if(!items.length) return html + '<p class="small">Пусто.</p>';
+  items
+    .sort((a,b)=>(b.reviewedAt?.seconds ?? 0)-(a.reviewedAt?.seconds ?? 0))
+    .forEach(x=>{
+      html += `<div class="row"><b>${x.nick ?? 'Без ника'}</b><p>${x.text ?? ''}</p><p class="small">status=${x.status ?? '—'} · note=${x.note ?? '—'} · ref=${x.referenceSubmissionId ?? '—'}</p></div>`;
+    });
+  return html;
+}
+
+async function loadArchive(){
+  const box = document.getElementById('archive');
+  box.innerHTML = 'Загрузка архива...';
+
+  const [ls, cs, ap] = await Promise.all([
+    getDocs(collection(db,'level_submissions')),
+    getDocs(collection(db,'completion_submissions')),
+    getDocs(collection(db,'appeals'))
+  ]);
+
+  const levels = []; const completions = []; const appeals = [];
+  ls.forEach(d=>{ const x=d.data(); if(x.status && x.status!=='pending') levels.push(x); });
+  cs.forEach(d=>{ const x=d.data(); if(x.status && x.status!=='pending') completions.push(x); });
+  ap.forEach(d=>{ const x=d.data(); if(x.status && x.status!=='pending') appeals.push(x); });
+
+  box.innerHTML =
+    renderArchiveSection('Архив уровней', levels) +
+    renderArchiveSection('Архив прохождений', completions) +
+    renderArchiveSection('Архив апелляций', appeals);
 }
 
 onAuthStateChanged(auth, async user => {
@@ -169,7 +209,7 @@ onAuthStateChanged(auth, async user => {
     if(data.role!=='moderator' && data.role!=='elder') return location.href='main.html';
 
     me = { uid:user.uid, nick:data.nick ?? 'moderator' };
-    await Promise.all([loadPendingLevels(), loadPendingCompletions(), loadUsersTab()]);
+    await Promise.all([loadPendingLevels(), loadPendingCompletions(), loadArchive(), loadUsersTab()]);
     statusEl.textContent='';
   } catch (e) {
     statusEl.textContent = getNetworkErrorMessage(e);
