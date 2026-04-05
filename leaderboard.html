@@ -225,7 +225,7 @@ onAuthStateChanged(auth, async user => {
   try {
     const meSnap = await getDoc(doc(db,'users',user.uid));
     const me = meSnap.exists() ? meSnap.data() : null;
-    if(!me || me.situation!=='verified') return location.href='nick.html';
+    if(!me) return location.href='nick.html';
 
     const [usersSnap, levelsSnap, allCompSnap, approvedSnap, scoreSnap] = await Promise.all([
       getDocs(query(collection(db,'users'), orderBy('points','desc'))),
