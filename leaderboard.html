@@ -1,165 +1,285 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>Leaderboard</title>
+<title>SpinList — Лидерборд</title>
 <link rel="stylesheet" href="hud.css">
 <style>
   .panel{display:none}
   .panel.active{display:block}
-  .item{border:1px solid #2d8cff55;background:rgba(0,20,50,.35);padding:10px;border-radius:10px;margin-bottom:10px}
-  .item input,.item textarea{width:100%;margin-top:6px}
+  #modal .dialog{width:min(1100px,96vw);max-height:95vh;min-height:70vh}
+  .modal-table{width:100%;border-collapse:collapse;margin-top:8px}
+  .modal-table th,.modal-table td{border:1px solid #3f8fcc55;padding:8px;text-align:left;vertical-align:top}
 </style>
 </head>
 <body>
-
+<div class="brand-hero">
+  <img src="spinlist-logo.svg" alt="SpinList logo">
+  <div class="brand-title">SPINLIST</div>
+</div>
 <div class="hud" style="max-width:1000px;margin:40px auto;">
   <div class="page-header">
-    <h1 style="margin:0;">Лидерборд и лист</h1>
-    <button id="backMain" class="btn-ghost">На главную</button>
+    <h1 style="margin:0;">Лидерборд</h1>
+    <button id="back" class="btn-ghost">На главную</button>
   </div>
-  <p id="status" style="margin:8px 0 14px;color:#00ffff;">Загрузка...</p>
-  <div class="tabs">
-    <button data-tab="players">Игроки</button>
-    <button data-tab="levels">Лист уровней</button>
-    <button data-tab="menu">Меню уровней</button>
+
+  <p id="status" style="color:#00ffff;">Загрузка...</p>
+
+  <div class="top-actions">
+    <button id="showPlayers" class="btn-success">Игроки</button>
+    <button id="showLevels">Лист уровней</button>
   </div>
-  <div id="players" class="panel active"><div id="playersList"></div></div>
-  <div id="levels" class="panel"><div id="levelsList"></div></div>
-  <div id="menu" class="panel">
-    <div class="card">
-      <h2 style="margin-top:0;">Меню уровней для игроков</h2>
-      <div class="menu-grid">
-        <button id="goSubmitLevel">Отправить уровень</button>
-        <button id="goSubmitCompletion">Отправить прохождение</button>
-        <button id="goSubmitAppeal">Отправить апелляцию</button>
-        <button id="goMySubmissions">Мои отправки</button>
-      </div>
+
+  <div id="playersPanel" class="panel active"><div id="playersList"></div></div>
+  <div id="levelsPanel" class="panel"><div id="levelsList"></div></div>
+</div>
+
+<div id="modal" class="dialog-backdrop">
+  <div class="dialog">
+    <div class="page-header">
+      <h2 id="modalTitle" style="margin:0;">Детали</h2>
+      <button id="closeModal" class="btn-ghost">Закрыть</button>
     </div>
-    <div id="moderatorMenuCard" class="card" style="margin-top:12px;display:none;">
-      <h2 style="margin-top:0;">Меню уровней для модераторов</h2>
-      <p class="small">Управление отправками и ручная постановка уровней.</p>
-      <div class="top-actions">
-        <button id="goModeratorLevels" class="btn-hero">Открыть модерацию уровней</button>
-      </div>
-    </div>
+    <div id="modalBody"></div>
   </div>
 </div>
 
 <script type="module">
-import { auth, db } from './firebase.js';
+import { auth, db, getNetworkErrorMessage } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import { collection, query, orderBy, getDocs, doc, getDoc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+import { collection, getDocs, orderBy, query, where, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
 const statusEl = document.getElementById('status');
 const playersList = document.getElementById('playersList');
 const levelsList = document.getElementById('levelsList');
-let canModerateLevels = false;
+const playersPanel = document.getElementById('playersPanel');
+const levelsPanel = document.getElementById('levelsPanel');
+const modal = document.getElementById('modal');
+const modalTitle = document.getElementById('modalTitle');
+const modalBody = document.getElementById('modalBody');
 
-function setTab(id){
-  document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
-  document.getElementById(id).classList.add('active');
-  document.querySelectorAll('.tabs button').forEach(btn=>btn.classList.toggle('active', btn.dataset.tab===id));
+let allCompletions = [];
+let approvedCompletions = [];
+let levelsById = new Map();
+let scoring = { maximumPoints:100, rankDecayFactor:3, repeatPenaltyPower:0.5 };
+
+
+function calcPoints(rank, size, k=1){
+  const n = Math.max(2, Number(size || 2));
+  const r = Math.max(1, Math.min(Number(rank || 1), n));
+  const x = (r - 1) / (n - 1);
+  return Math.round((scoring.maximumPoints * Math.exp(-scoring.rankDecayFactor * x) / Math.pow(Math.max(1,k), scoring.repeatPenaltyPower))*100)/100;
 }
-document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
-document.getElementById('backMain').onclick = ()=> location.href='main.html';
-document.getElementById('goSubmitLevel').onclick = ()=> location.href='submit-level.html';
-document.getElementById('goSubmitCompletion').onclick = ()=> location.href='submit-completion.html';
-document.getElementById('goSubmitAppeal').onclick = ()=> location.href='submit-appeal.html';
-document.getElementById('goMySubmissions').onclick = ()=> location.href='my-submissions.html';
-document.getElementById('goModeratorLevels').onclick = ()=> location.href='moderator-levels.html';
-if(location.hash === '#menu') setTab('menu');
-else if(location.hash === '#levels') setTab('levels');
-else setTab('players');
 
-function renderLevel(levelDoc){
-  const lv = levelDoc.data();
-  if(lv.status === 'archived') return null;
-  const item = document.createElement('div');
-  item.className='item';
+function setView(name){
+  const players = name === 'players';
+  playersPanel.classList.toggle('active', players);
+  levelsPanel.classList.toggle('active', !players);
+  document.getElementById('showPlayers').classList.toggle('btn-success', players);
+  document.getElementById('showLevels').classList.toggle('btn-success', !players);
+}
 
-  if(!canModerateLevels){
-    item.innerHTML = `<b>#${lv.rank ?? '—'}</b> · <a target="_blank" href="${lv.link}">Открыть уровень</a><br>${lv.text ?? ''}<br><span class="small">Файл: ${lv.fileUrl || '—'}</span>`;
-    return item;
+function openModal(title, html){
+  modalTitle.textContent = title;
+  modalBody.innerHTML = html;
+  modal.classList.add('open');
+}
+
+function formatModeration(x){
+  const who = x.reviewedBy ?? '—';
+  const when = x.reviewedAt?.seconds ? new Date(x.reviewedAt.seconds * 1000).toLocaleString('ru-RU') : '—';
+  return `status=${x.status ?? '—'} · note=${x.note ?? '—'} · reviewedBy=${who} · reviewedAt=${when}`;
+}
+
+function openPlayerLevelHistory(user, levelId, levelRank){
+  const records = allCompletions
+    .filter(x => x.playerId === user.id)
+    .filter(x => {
+      if(levelId && x.levelId) return x.levelId === levelId;
+      return Number(x.listRank ?? -1) === Number(levelRank ?? -2);
+    })
+    .sort((a,b)=>(a.createdAt?.seconds ?? 0) - (b.createdAt?.seconds ?? 0));
+
+  const levelName = levelId ? (levelsById.get(levelId)?.text ?? 'Уровень') : `Уровень #${levelRank ?? '—'}`;
+
+  if(!records.length){
+    openModal(`История по уровню: ${levelName}`, '<p>Отправок по этому уровню не найдено.</p>');
+    return;
   }
 
-  item.innerHTML = `
-    <b>#${lv.rank ?? '—'}</b> · <a target="_blank" href="${lv.link}">Открыть уровень</a>
-    <textarea class="editText" placeholder="Описание">${lv.text ?? ''}</textarea>
-    <input class="editLink" value="${lv.link ?? ''}" placeholder="Ссылка на уровень">
-    <input class="editFile" value="${lv.fileUrl ?? ''}" placeholder="Ссылка на файл (опционально)">
-    <input class="editRank" type="number" min="1" value="${lv.rank ?? 1}" placeholder="Место">
-    <div class="top-actions">
-      <button class="saveLevel">Сохранить</button>
-      <button class="deleteLevel btn-danger">Удалить уровень</button>
-    </div>
+  let html = `<p><b>Игрок:</b> ${user.nick ?? 'Без ника'}</p><p><b>Уровень:</b> ${levelName}</p>`;
+  html += '<table class="modal-table"><thead><tr><th>#</th><th>Что отправил</th><th>Модерация</th></tr></thead><tbody>';
+  records.forEach((x, i)=>{
+    const sent = `${x.text ?? ''} ${x.link ? ' | '+x.link : ''} ${x.fileUrl ? ' | файл: '+x.fileUrl : ''} ${x.referenceSubmissionId ? ' | ref:'+x.referenceSubmissionId : ''}`.trim();
+    html += `<tr><td>${i+1}</td><td>${sent || '—'}</td><td>${formatModeration(x)}</td></tr>`;
+  });
+  html += '</tbody></table>';
+  openModal(`История по уровню: ${levelName}`, html);
+}
+
+function openPlayerCompletions(user){
+  const mineApproved = approvedCompletions
+    .filter(x=>x.playerId===user.id)
+    .sort((a,b)=>Number(a.listRank ?? 9999) - Number(b.listRank ?? 9999));
+
+  let html = `
+    <p><b>Ник:</b> ${user.nick ?? 'Без ника'}</p>
+    <p><b>Почта:</b> ${user.email ?? '—'}</p>
+    <p><b>Роль:</b> ${user.role ?? 'player'}</p>
+    <p><b>Статус:</b> ${user.situation ?? '—'}</p>
+    <p><b>Очки:</b> ${Number(user.points ?? 0)}</p>
+    <p><b>Место в топе:</b> ${user.rank}</p>
+    <p><b>Подтвержденных прохождений:</b> ${mineApproved.length}</p>
   `;
-  item.querySelector('.saveLevel').onclick = async ()=>{
-    const rank = Number(item.querySelector('.editRank').value);
-    const link = item.querySelector('.editLink').value.trim();
-    const text = item.querySelector('.editText').value.trim();
-    const fileUrl = item.querySelector('.editFile').value.trim();
-    if(!rank || !link){ alert('Нужны место и ссылка'); return; }
-    await updateDoc(doc(db,'levels',levelDoc.id), { rank, link, text, fileUrl });
-    item.style.outline = '1px solid rgba(32,245,204,.7)';
-  };
-  item.querySelector('.deleteLevel').onclick = async ()=>{
-    if(!confirm('Удалить уровень из листа?')) return;
-    await deleteDoc(doc(db,'levels',levelDoc.id));
-    item.remove();
-  };
-  return item;
-}
 
-onAuthStateChanged(auth, async u=>{
- if(!u) return location.href='index.html';
-
- try {
-  const meSnap = await getDoc(doc(db,'users',u.uid));
-  const me = meSnap.exists() ? meSnap.data() : null;
-  if(!me || me.situation!=='verified') return location.href='nick.html';
-  canModerateLevels = (me.role==='moderator' || me.role==='elder');
-  if(canModerateLevels){
-    document.getElementById('moderatorMenuCard').style.display = '';
+  if(!mineApproved.length){
+    html += '<p>Подтвержденных прохождений нет.</p>';
+    openModal(`Игрок: ${user.nick ?? 'Без ника'}`, html);
+    return;
   }
 
-  const usersSnap = await getDocs(query(collection(db,'users'),orderBy('points','desc')));
-  let r=0,p=0,last=null;
-  usersSnap.forEach(d=>{
-    const u2=d.data();
-    if(u2.situation!=='verified') return;
-    r++;
-    if(u2.points!==last){p=r;last=u2.points;}
-    const row=document.createElement('div');
-    row.className='row';
-    if(d.id===u.uid) row.classList.add('me');
-    if(u2.role==='moderator') row.classList.add('moderator');
-    if(u2.role==='elder') row.classList.add('elder');
-    row.innerHTML=`<div>${p}</div><div>${u2.nick ?? 'Без ника'}</div><div>${u2.points ?? 0}</div>`;
+  html += '<table class="modal-table"><thead><tr><th>#Сложн.</th><th>Уровень</th><th>Очки</th><th>Действие</th></tr></thead><tbody>';
+  mineApproved.forEach(c=>{
+    const level = c.levelId ? levelsById.get(c.levelId) : null;
+    const levelName = level?.text ?? c.text ?? 'Уровень';
+    const lvlRank = Number(c.listRank ?? level?.rank ?? 9999);
+    html += `<tr><td>${lvlRank}</td><td>${levelName}</td><td>${Number(c.awardedPoints ?? 0)}</td><td><button class="openHistory" data-level-id="${c.levelId ?? ''}" data-level-rank="${lvlRank}">Все отправки по уровню</button></td></tr>`;
+  });
+  html += '</tbody></table>';
+
+  openModal(`Игрок: ${user.nick ?? 'Без ника'}`, html);
+
+  modalBody.querySelectorAll('.openHistory').forEach(btn=>{
+    btn.onclick = ()=> openPlayerLevelHistory(user, btn.dataset.levelId || '', Number(btn.dataset.levelRank || 0));
+  });
+}
+
+document.getElementById('showPlayers').onclick = ()=> setView('players');
+document.getElementById('showLevels').onclick = ()=> setView('levels');
+document.getElementById('back').onclick = ()=> location.href='main.html';
+document.getElementById('closeModal').onclick = ()=> modal.classList.remove('open');
+
+function renderPlayers(users){
+  playersList.innerHTML = '';
+  if(!users.length){
+    playersList.innerHTML = '<p>Нет верифицированных игроков.</p>';
+    return;
+  }
+
+  users.forEach(u => {
+    const row = document.createElement('div');
+    row.className = 'row list-item clickable';
+    if(u.role==='moderator') row.classList.add('moderator');
+    if(u.role==='elder') row.classList.add('elder');
+    row.innerHTML = `<div>${u.rank}</div><div>${u.nick ?? 'Без ника'}</div><div>${u.points}</div>`;
+    row.onclick = ()=> openPlayerCompletions(u);
     playersList.appendChild(row);
   });
+}
 
-  const levelsSnap = await getDocs(query(collection(db,'levels'), orderBy('rank','asc')));
-  if(levelsSnap.empty){
-    levelsList.innerHTML = '<p>Лист уровней пока пуст.</p>';
-  } else {
-    levelsSnap.forEach(d=>{
-      const lv = d.data();
-    if(lv.status==='archived') return;
-      const item = renderLevel(d);
-      if(item) levelsList.appendChild(item);
+function renderLevels(levels){
+  levelsList.innerHTML = '';
+  if(!levels.length){
+    levelsList.innerHTML = '<p>Лист уровней пуст.</p>';
+    return;
+  }
+
+  levels.forEach(l => {
+    const row = document.createElement('div');
+    row.className = 'row list-item clickable';
+    const basePoints = calcPoints(Number(l.rank ?? 1), levels.length, 1);
+    const builder = (l.builder ?? l.creator ?? l.maker ?? '—');
+    const verifier = (l.verifier ?? l.verifiedBy ?? l.checker ?? '—');
+    row.innerHTML = `<div>${Number(l.rank ?? 0) || '—'}</div><div><b>${l.text ?? 'Без названия'}</b><div class="small">Строитель: ${builder} · Верифер: ${verifier}</div></div><div>${basePoints}</div>`;
+
+    row.onclick = (e)=>{
+      if(e.target.tagName === 'A') return;
+      const passed = approvedCompletions.filter(c => {
+        if(c.levelId && l.id) return c.levelId === l.id;
+        return Number(c.listRank ?? -1) === Number(l.rank ?? -2);
+      });
+
+      if(!passed.length){
+        openModal(`Уровень #${l.rank ?? '—'}`, '<p>Этот уровень пока никто не прошел.</p>');
+        return;
+      }
+
+      const builderText = (l.builder ?? l.creator ?? l.maker ?? '—');
+      const verifierText = (l.verifier ?? l.verifiedBy ?? l.checker ?? '—');
+      let html = `<p><b>Базовые очки уровня:</b> ${calcPoints(Number(l.rank ?? 1), levels.length, 1)}</p><p><b>Строитель:</b> ${builderText} · <b>Верифер:</b> ${verifierText}</p>`;
+      html += '<table class="modal-table"><thead><tr><th>#</th><th>Игрок</th><th>Очки</th></tr></thead><tbody>';
+      passed.forEach((c, idx)=>{
+        html += `<tr><td>${idx+1}</td><td>${c.nick ?? 'Без ника'}</td><td>${Number(c.awardedPoints ?? 0)}</td></tr>`;
+      });
+      html += '</tbody></table>';
+      openModal(`Уровень #${l.rank ?? '—'}`, html);
+    };
+
+    levelsList.appendChild(row);
+  });
+}
+
+onAuthStateChanged(auth, async user => {
+  if(!user) return location.href='index.html';
+
+  try {
+    const meSnap = await getDoc(doc(db,'users',user.uid));
+    const me = meSnap.exists() ? meSnap.data() : null;
+    if(!me || me.situation!=='verified') return location.href='nick.html';
+
+    const [usersSnap, levelsSnap, allCompSnap, approvedSnap, scoreSnap] = await Promise.all([
+      getDocs(query(collection(db,'users'), orderBy('points','desc'))),
+      getDocs(query(collection(db,'levels'), orderBy('rank','asc'))),
+      getDocs(collection(db,'completion_submissions')),
+      getDocs(query(collection(db,'completion_submissions'), where('status','==','approved'))),
+      getDoc(doc(db,'settings','scoring'))
+    ]);
+
+    const sv = scoreSnap.exists() ? scoreSnap.data() : {};
+    scoring = {
+      maximumPoints: Number(sv.maximumPoints ?? sv.maxPoints ?? 100),
+      rankDecayFactor: Number(sv.rankDecayFactor ?? sv.decayA ?? 3),
+      repeatPenaltyPower: Number(sv.repeatPenaltyPower ?? sv.grindPower ?? 0.5)
+    };
+
+    const users = [];
+    let seen = 0;
+    let rank = 0;
+    let lastPoints = null;
+
+    usersSnap.forEach(d => {
+      const u = d.data();
+      if(u.situation !== 'verified') return;
+      const points = Number(u.points ?? 0);
+      seen += 1;
+      if(lastPoints !== points){ rank = seen; lastPoints = points; }
+      users.push({ id:d.id, ...u, points, rank });
     });
-  }
 
-  if(!playersList.childElementCount){
-    statusEl.textContent='Пока нет верифицированных участников.';
-  } else {
-    statusEl.textContent='';
+    const levels = [];
+    levelsById = new Map();
+    levelsSnap.forEach(d => {
+      const l = d.data();
+      if(l.status === 'archived') return;
+      const item = { id:d.id, ...l };
+      levels.push(item);
+      levelsById.set(d.id, item);
+    });
+
+    allCompletions = [];
+    allCompSnap.forEach(d=>allCompletions.push({ id:d.id, ...d.data() }));
+
+    approvedCompletions = [];
+    approvedSnap.forEach(d=>approvedCompletions.push({ id:d.id, ...d.data() }));
+
+    renderPlayers(users);
+    renderLevels(levels);
+
+    statusEl.textContent = '';
+    setView('players');
+  } catch (e) {
+    statusEl.textContent = getNetworkErrorMessage(e);
   }
- } catch (e) {
-  console.error(e);
-  statusEl.textContent='Не удалось загрузить данные. Попробуйте позже.';
- }
 });
 </script>
 </body>

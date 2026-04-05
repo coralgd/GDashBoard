@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>Старший модератор</title>
+<title>SpinList — Старший модератор</title>
 <link rel="stylesheet" href="hud.css">
 <style>
   .tabs button{margin-right:8px}
@@ -14,6 +14,10 @@
 </style>
 </head>
 <body>
+<div class="brand-hero">
+  <img src="spinlist-logo.svg" alt="SpinList logo">
+  <div class="brand-title">SPINLIST</div>
+</div>
 <div class="hud" style="max-width:1100px;margin:40px auto;">
   <h1>Панель старшего модератора</h1>
   <p id="status" style="color:#00ffff;">Загрузка...</p>
@@ -47,6 +51,8 @@
       <b>Ручное добавление уровня в лист</b>
       <input id="mLink" placeholder="Ссылка на уровень">
       <textarea id="mText" placeholder="Описание"></textarea>
+      <input id="mBuilder" placeholder="Строитель уровня">
+      <input id="mVerifier" placeholder="Верифер уровня">
       <input id="mFile" placeholder="Ссылка на файл (опционально)">
       <input id="mRank" type="number" min="1" placeholder="Место в листе">
       <button id="mAdd">Добавить в лист</button>
@@ -219,6 +225,7 @@ async function loadLevelSubmissions(elder){
       if(!rank){ alert('Укажи место'); return; }
       await addDoc(collection(db,'levels'), {
         link:s.link, text:s.text ?? '', fileUrl:s.fileUrl ?? '', rank,
+        builder:s.builder ?? '—', verifier:s.verifier ?? '—',
         addedBy:elder.uid, addedByNick:elder.nick ?? 'elder', createdAt:serverTimestamp(),
         sourceSubmissionId:d.id, status:'active'
       });
@@ -339,11 +346,13 @@ onAuthStateChanged(auth, async user=>{
       const link = document.getElementById('mLink').value.trim();
       const text = document.getElementById('mText').value.trim();
       const fileUrl = document.getElementById('mFile').value.trim();
+      const builder = document.getElementById('mBuilder').value.trim();
+      const verifier = document.getElementById('mVerifier').value.trim();
       const rank = Number(document.getElementById('mRank').value);
       const msg = document.getElementById('mMsg');
-      if(!link || !text || !rank){ msg.textContent='Нужны ссылка, текст и место'; return; }
+      if(!link || !text || !builder || !verifier || !rank){ msg.textContent='Нужны ссылка, текст, строитель, верифер и место'; return; }
       await addDoc(collection(db,'levels'), {
-        link, text, fileUrl, rank,
+        link, text, fileUrl, rank, builder, verifier,
         addedBy:user.uid, addedByNick:me.nick ?? 'elder', createdAt:serverTimestamp(),
         status:'active', sourceSubmissionId:null
       });
