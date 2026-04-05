@@ -236,6 +236,7 @@ onAuthStateChanged(auth, async user=>{
     const meSnap = await getDoc(doc(db,'users',user.uid));
     const me = meSnap.exists() ? meSnap.data() : null;
     if(!me || me.situation!=='verified') return location.href='nick.html';
+    if(me.role!=='moderator' && me.role!=='elder') return location.href='main.html';
 
     await loadData();
     statusEl.textContent='';
