@@ -98,10 +98,6 @@ function renderPlayers(users){
 
     row.onclick = ()=>{
       const mine = approvedCompletions.filter(x=>x.playerId===u.id);
-      if(!mine.length){
-        openModal(`Игрок: ${u.nick ?? 'Без ника'}`, '<p>Подтвержденных прохождений нет.</p>');
-        return;
-      }
 
       let html = `
         <p><b>Ник:</b> ${u.nick ?? 'Без ника'}</p>
@@ -111,8 +107,15 @@ function renderPlayers(users){
         <p><b>Очки:</b> ${Number(u.points ?? 0)}</p>
         <p><b>Место в топе:</b> ${u.rank}</p>
         <p><b>Подтвержденных прохождений:</b> ${mine.length}</p>
-        <table class="modal-table"><thead><tr><th>#</th><th>Уровень</th><th>Что отправил</th><th>Очки</th><th>Статус/коммент</th></tr></thead><tbody>
       `;
+
+      if(!mine.length){
+        html += '<p>Подтвержденных прохождений нет.</p>';
+        openModal(`Игрок: ${u.nick ?? 'Без ника'}`, html);
+        return;
+      }
+
+      html += '<table class="modal-table"><thead><tr><th>#</th><th>Уровень</th><th>Что отправил</th><th>Очки</th><th>Статус/коммент</th></tr></thead><tbody>';
       mine
         .sort((a,b)=>(a.reviewedAt?.seconds ?? 0) - (b.reviewedAt?.seconds ?? 0))
         .forEach((c, idx)=>{
