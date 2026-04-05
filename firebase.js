@@ -20,9 +20,9 @@ try {
 }
 export const db = dbInst;
 
-export function getNetworkErrorMessage(error){
+export function getNetworkErrorMessage(error) {
   const code = String(error?.code ?? '');
-  if(code.includes('permission-denied')) return 'Нет доступа. Проверь роль, верификацию и правила Firestore.';
-  if(code.includes('unavailable') || code.includes('deadline-exceeded') || code.includes('failed-precondition')) return 'Нет связи с Firebase. Проверь интернет/VPN/прокси.';
-  return error?.message || 'Ошибка Firebase.';
+  if (code.includes('permission-denied')) return 'Нет доступа. Проверь роль, верификацию и правила Firestore.';
+  if (code.includes('unavailable') || code.includes('deadline-exceeded') || code.includes('failed-precondition')) return 'Проблема сети/Firebase. Проверь интернет, VPN и firewall.';
+  return error?.message || 'Неизвестная ошибка Firebase.';
 }
