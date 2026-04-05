@@ -25,15 +25,20 @@
 </div>
 
 <script type="module">
-import { auth, db } from './firebase.js';
+import { auth, db, getNetworkErrorMessage } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
 import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
 onAuthStateChanged(auth, async user => {
   if(!user) return location.href='index.html';
-  const meSnap = await getDoc(doc(db,'users',user.uid));
-  const me = meSnap.exists() ? meSnap.data() : null;
-  if(!me || me.situation !== 'verified') return location.href='nick.html';
+  try {
+    const meSnap = await getDoc(doc(db,'users',user.uid));
+    const me = meSnap.exists() ? meSnap.data() : null;
+    if(!me || me.situation !== 'verified') return location.href='nick.html';
+  } catch (error) {
+    console.error(error);
+    alert(getNetworkErrorMessage(error));
+  }
 });
 
 document.getElementById('goSubmitLevel').onclick = ()=> location.href='submit-level.html';

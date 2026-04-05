@@ -92,7 +92,7 @@
 </div>
 
 <script type="module">
-import { auth, db } from './firebase.js';
+import { auth, db, getNetworkErrorMessage } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
 import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, orderBy, query, serverTimestamp, setDoc, updateDoc, where } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
@@ -445,16 +445,21 @@ function openSubmission(item){
 
 onAuthStateChanged(auth, async user => {
   if(!user) return location.href='index.html';
-  const meSnap = await getDoc(doc(db,'users',user.uid));
-  const me = meSnap.exists() ? meSnap.data() : null;
-  if(!me || me.situation !== 'verified') return location.href='nick.html';
-  if(me.role !== 'elder') return location.href='main.html';
+  try {
+    const meSnap = await getDoc(doc(db,'users',user.uid));
+    const me = meSnap.exists() ? meSnap.data() : null;
+    if(!me || me.situation !== 'verified') return location.href='nick.html';
+    if(me.role !== 'elder') return location.href='main.html';
 
-  elder = { uid:user.uid, nick:me.nick ?? 'elder' };
-  await loadScoring();
-  await renderLevels();
-  await loadSubmissions();
-  statusEl.textContent = '';
+    elder = { uid:user.uid, nick:me.nick ?? 'elder' };
+    await loadScoring();
+    await renderLevels();
+    await loadSubmissions();
+    statusEl.textContent = '';
+  } catch (error) {
+    console.error(error);
+    statusEl.textContent = getNetworkErrorMessage(error);
+  }
 });
 </script>
 </body>

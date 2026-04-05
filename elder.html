@@ -39,7 +39,7 @@
 </div>
 
 <script type="module">
-import { auth, db } from './firebase.js';
+import { auth, db, getNetworkErrorMessage } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
 import { collection, deleteDoc, doc, getDoc, getDocs, orderBy, query, updateDoc, where } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
@@ -256,13 +256,18 @@ async function renderUsers(){
 
 onAuthStateChanged(auth, async user => {
   if(!user) return location.href='index.html';
-  const meSnap = await getDoc(doc(db,'users',user.uid));
-  const me = meSnap.exists() ? meSnap.data() : null;
-  if(!me || me.situation !== 'verified') return location.href='nick.html';
-  if(me.role !== 'elder') return location.href='main.html';
+  try {
+    const meSnap = await getDoc(doc(db,'users',user.uid));
+    const me = meSnap.exists() ? meSnap.data() : null;
+    if(!me || me.situation !== 'verified') return location.href='nick.html';
+    if(me.role !== 'elder') return location.href='main.html';
 
-  await renderUsers();
-  statusEl.textContent = '';
+    await renderUsers();
+    statusEl.textContent = '';
+  } catch (error) {
+    console.error(error);
+    statusEl.textContent = getNetworkErrorMessage(error);
+  }
 });
 </script>
 </body>

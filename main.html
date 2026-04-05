@@ -30,7 +30,7 @@
 </div>
 
 <script type="module">
-import { auth, db } from './firebase.js';
+import { auth, db, getNetworkErrorMessage } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
 import { collection, doc, getDoc, getDocs, orderBy, query } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
@@ -52,38 +52,42 @@ function routeByRole(role){
 
 onAuthStateChanged(auth, async user => {
   if(!user) return location.href = 'index.html';
+  try {
+    const meSnap = await getDoc(doc(db, 'users', user.uid));
+    const me = meSnap.exists() ? meSnap.data() : null;
+    if(!me || me.situation !== 'verified') return location.href = 'nick.html';
 
-  const meSnap = await getDoc(doc(db, 'users', user.uid));
-  const me = meSnap.exists() ? meSnap.data() : null;
-  if(!me || me.situation !== 'verified') return location.href = 'nick.html';
+    nickEl.textContent = me.nick ?? 'Без ника';
+    pointsEl.textContent = String(Number(me.points ?? 0));
+    roleEl.textContent = me.role ?? 'player';
 
-  nickEl.textContent = me.nick ?? 'Без ника';
-  pointsEl.textContent = String(Number(me.points ?? 0));
-  roleEl.textContent = me.role ?? 'player';
+    const usersSnap = await getDocs(query(collection(db,'users'), orderBy('points','desc')));
+    let i = 0;
+    let rank = 0;
+    let place = '—';
+    let last = null;
+    usersSnap.forEach(d => {
+      const u = d.data();
+      if(u.situation !== 'verified') return;
+      i++;
+      if(u.points !== last){ rank = i; last = u.points; }
+      if(d.id === user.uid) place = String(rank);
+    });
+    placeEl.textContent = place;
 
-  const usersSnap = await getDocs(query(collection(db,'users'), orderBy('points','desc')));
-  let i = 0;
-  let rank = 0;
-  let place = '—';
-  let last = null;
-  usersSnap.forEach(d => {
-    const u = d.data();
-    if(u.situation !== 'verified') return;
-    i++;
-    if(u.points !== last){ rank = i; last = u.points; }
-    if(d.id === user.uid) place = String(rank);
-  });
-  placeEl.textContent = place;
+    document.getElementById('goBoard').onclick = () => location.href = 'leaderboard.html';
+    document.getElementById('goLevels').onclick = () => location.href = 'levels-menu.html';
+    document.getElementById('goModeration').onclick = () => {
+      const to = routeByRole(me.role);
+      if(!to){ warnEl.textContent = 'У тебя нет роли модератора.'; return; }
+      location.href = to;
+    };
 
-  document.getElementById('goBoard').onclick = () => location.href = 'leaderboard.html';
-  document.getElementById('goLevels').onclick = () => location.href = 'levels-menu.html';
-  document.getElementById('goModeration').onclick = () => {
-    const to = routeByRole(me.role);
-    if(!to){ warnEl.textContent = 'У тебя нет роли модератора.'; return; }
-    location.href = to;
-  };
-
-  statusEl.textContent = '';
+    statusEl.textContent = '';
+  } catch (error) {
+    console.error(error);
+    statusEl.textContent = getNetworkErrorMessage(error);
+  }
 });
 </script>
 </body>

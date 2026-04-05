@@ -44,7 +44,7 @@
 </div>
 
 <script type="module">
-import { auth, db } from './firebase.js';
+import { auth, db, getNetworkErrorMessage } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
 import { collection, doc, getDoc, getDocs, orderBy, query, where } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
@@ -75,8 +75,6 @@ function points(rank, size, k = 1){
   const value = scoring.maximumPoints * Math.exp(-scoring.rankDecayFactor * x) / Math.pow(Math.max(1, k), scoring.repeatPenaltyPower);
   return Math.round(value * 100) / 100;
 }
-function esc(v){ return String(v ?? '').replace(/[&<>'"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;' }[c])); }
-function safeUrl(v){ try { const u = new URL((v ?? '').trim()); return (u.protocol==='http:' || u.protocol==='https:') ? u.toString() : ''; } catch { return ''; } }
 
 function toggleView(){
   showLevels = !showLevels;
@@ -84,6 +82,8 @@ function toggleView(){
   levelsPanel.classList.toggle('active', showLevels);
   toggleBtn.textContent = showLevels ? 'Показать топ игроков' : 'Показать лист уровней';
 }
+function esc(v){ return String(v ?? '').replace(/[&<>'"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;' }[c])); }
+function safeUrl(v){ try { const u = new URL((v ?? '').trim()); return (u.protocol==='http:' || u.protocol==='https:') ? u.toString() : ''; } catch { return ''; } }
 
 toggleBtn.onclick = toggleView;
 
@@ -226,6 +226,19 @@ onAuthStateChanged(auth, async user=>{
   });
 }
 
+  passed.forEach(c => {
+    const lv = c.levelId ? levels.find(x => x.id === c.levelId) : levels.find(x => Number(x.rank) === Number(c.listRank));
+    const row = document.createElement('div');
+    row.className = 'row list-item';
+    row.append(
+      text('div', `#${Number(c.listRank ?? 0) || '—'}`),
+      text('div', lv?.text ?? c.text ?? 'Уровень'),
+      text('div', String(Number(c.awardedPoints ?? 0)))
+    );
+    infoBody.appendChild(row);
+  });
+}
+
 function openLevel(level){
   openModal(`Уровень #${level.rank ?? '—'}`);
   const linkP = document.createElement('p');
@@ -287,12 +300,17 @@ searchInput.oninput = renderPlayers;
 
 onAuthStateChanged(auth, async user => {
   if(!user) return location.href='index.html';
-  const meSnap = await getDoc(doc(db,'users',user.uid));
-  const me = meSnap.exists() ? meSnap.data() : null;
-  if(!me || me.situation !== 'verified') return location.href='nick.html';
+  try {
+    const meSnap = await getDoc(doc(db,'users',user.uid));
+    const me = meSnap.exists() ? meSnap.data() : null;
+    if(!me || me.situation !== 'verified') return location.href='nick.html';
 
-  await loadData();
-  statusEl.textContent = '';
+    await loadData();
+    statusEl.textContent = '';
+  } catch (error) {
+    console.error(error);
+    statusEl.textContent = getNetworkErrorMessage(error);
+  }
 });
 </script>
 </body>
