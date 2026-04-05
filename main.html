@@ -57,7 +57,8 @@ onAuthStateChanged(auth, async user => {
     document.getElementById('leaderboardBtn').onclick = ()=> location.href='leaderboard.html';
     document.getElementById('openLevelsMenu').onclick = ()=> location.href='levels-menu.html';
     document.getElementById('check').onclick = ()=>{
-      if(profile.role==='moderator' || profile.role==='elder') location.href='moderator.html';
+      if(profile.role==='elder') location.href='elder.html';
+      else if(profile.role==='moderator') location.href='moderator.html';
       else err.textContent='Доступно только модераторам';
     };
     statusEl.textContent = '';

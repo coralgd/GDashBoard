@@ -4,27 +4,17 @@
 <meta charset="UTF-8">
 <title>Лидерборд</title>
 <link rel="stylesheet" href="hud.css">
-<style>
-  .panel{display:none}
-  .panel.active{display:block}
-  .item{border:1px solid #2d8cff55;background:rgba(0,20,50,.35);padding:10px;border-radius:10px;margin-bottom:10px}
-</style>
 </head>
 <body>
-<div class="hud" style="max-width:1120px;margin:30px auto;">
+<div class="hud" style="max-width:900px;margin:40px auto;">
   <div class="page-header">
     <h1 style="margin:0;">Лидерборд</h1>
     <button id="back" class="btn-ghost">На главную</button>
   </div>
-  <p id="status" style="margin:8px 0 14px;color:#00ffff;">Загрузка...</p>
 
-  <div class="tabs">
-    <button data-tab="players">Игроки</button>
-    <button data-tab="levels">Лист уровней</button>
-  </div>
-
-  <div id="players" class="panel active"><div id="playersList"></div></div>
-  <div id="levels" class="panel"><div id="levelsList"></div></div>
+  <p id="status" style="color:#00ffff;">Загрузка...</p>
+  <div class="row small"><div>#</div><div>Ник</div><div>Очки</div></div>
+  <div id="list"></div>
 </div>
 
 <div id="modal" class="dialog-backdrop"><div class="dialog"><div class="page-header"><h2 id="mTitle">Инфо</h2><button id="mClose" class="btn-ghost">Закрыть</button></div><div id="mBody"></div></div></div>
@@ -32,53 +22,52 @@
 <script type="module">
 import { auth, db, getNetworkErrorMessage } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import { collection, query, orderBy, getDocs, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+import { collection, getDocs, orderBy, query, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
 const statusEl = document.getElementById('status');
-const playersList = document.getElementById('playersList');
-const levelsList = document.getElementById('levelsList');
+const listEl = document.getElementById('list');
+document.getElementById('back').onclick = ()=> location.href='main.html';
 
-function setTab(id){
-  document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
-  document.getElementById(id).classList.add('active');
-}
-document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
-document.getElementById('backMain').onclick = ()=> location.href='main.html';
-
-onAuthStateChanged(auth, async user=>{
+onAuthStateChanged(auth, async user => {
   if(!user) return location.href='index.html';
+
   try {
     const meSnap = await getDoc(doc(db,'users',user.uid));
     const me = meSnap.exists() ? meSnap.data() : null;
     if(!me || me.situation!=='verified') return location.href='nick.html';
 
-    const usersSnap = await getDocs(query(collection(db,'users'), orderBy('points','desc')));
-    let r=0,p=0,last=null;
-    usersSnap.forEach(d=>{
-      const u=d.data();
-      if(u.situation!=='verified') return;
-      r++;
-      if(u.points!==last){p=r;last=u.points;}
-      const row=document.createElement('div');
-      row.className='row';
-      row.innerHTML=`<div>${p}</div><div>${u.nick ?? 'Без ника'}</div><div>${Number(u.points ?? 0)}</div>`;
-      playersList.appendChild(row);
+    const snap = await getDocs(query(collection(db,'users'), orderBy('points','desc')));
+    listEl.innerHTML = '';
+
+    let seen = 0;
+    let rank = 0;
+    let lastPoints = null;
+
+    snap.forEach(d => {
+      const u = d.data();
+      if(u.situation !== 'verified') return;
+
+      const points = Number(u.points ?? 0);
+      seen += 1;
+      if(lastPoints !== points){
+        rank = seen;
+        lastPoints = points;
+      }
+
+      const row = document.createElement('div');
+      row.className = 'row list-item';
+      row.innerHTML = `<div>${rank}</div><div>${u.nick ?? 'Без ника'}</div><div>${points}</div>`;
+      listEl.appendChild(row);
     });
 
-    const levelsSnap = await getDocs(query(collection(db,'levels'), orderBy('rank','asc')));
-    if(levelsSnap.empty) levelsList.innerHTML='<p>Лист уровней пока пуст.</p>';
-    levelsSnap.forEach(d=>{
-      const l=d.data();
-      if(l.status==='archived') return;
-      const item=document.createElement('div');
-      item.className='item';
-      item.innerHTML=`<b>#${l.rank ?? '—'}</b> · <a target="_blank" href="${l.link ?? '#'}">Открыть</a><br>${l.text ?? ''}`;
-      levelsList.appendChild(item);
-    });
+    if(!listEl.children.length){
+      statusEl.textContent = 'Нет верифицированных игроков.';
+      return;
+    }
 
-    statusEl.textContent='';
+    statusEl.textContent = '';
   } catch (e) {
-    statusEl.textContent=getNetworkErrorMessage(e);
+    statusEl.textContent = getNetworkErrorMessage(e);
   }
 });
 </script>
