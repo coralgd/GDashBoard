@@ -6,17 +6,21 @@
 <link rel="stylesheet" href="hud.css">
 </head>
 <body>
-<div class="hud" style="max-width:780px">
+<div class="hud" style="max-width:780px;margin:50px auto;">
   <div class="page-header">
-    <h1>Меню уровней</h1>
+    <h1 style="margin:0;">Меню уровней</h1>
     <button id="back" class="btn-ghost">Назад</button>
   </div>
 
-  <div class="top-actions">
-    <button id="a">Отправить новый уровень</button>
-    <button id="b">Отправить прохождение</button>
-    <button id="c">Подать апелляцию</button>
-    <button id="d">История отправок</button>
+  <p class="small">Подача заявок и просмотр своей истории.</p>
+
+  <div class="card">
+    <div class="menu-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+      <button id="goSubmitLevel">Отправить новый уровень</button>
+      <button id="goSubmitCompletion">Отправить прохождение</button>
+      <button id="goSubmitAppeal">Подать апелляцию</button>
+      <button id="goMySubmissions">История отправок</button>
+    </div>
   </div>
 </div>
 
@@ -25,22 +29,23 @@ import { auth, db, getNetworkErrorMessage } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
 import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
-onAuthStateChanged(auth, async user=>{
+onAuthStateChanged(auth, async user => {
   if(!user) return location.href='index.html';
   try {
-    const me = await getDoc(doc(db,'users',user.uid));
-    const data = me.exists()?me.data():null;
-    if(!data || data.situation!=='verified') return location.href='nick.html';
-  } catch (e) {
-    alert(getNetworkErrorMessage(e));
+    const meSnap = await getDoc(doc(db,'users',user.uid));
+    const me = meSnap.exists() ? meSnap.data() : null;
+    if(!me || me.situation !== 'verified') return location.href='nick.html';
+  } catch (error) {
+    console.error(error);
+    alert(getNetworkErrorMessage(error));
   }
 });
 
-document.getElementById('a').onclick=()=>location.href='submit-level.html';
-document.getElementById('b').onclick=()=>location.href='submit-completion.html';
-document.getElementById('c').onclick=()=>location.href='submit-appeal.html';
-document.getElementById('d').onclick=()=>location.href='my-submissions.html';
-document.getElementById('back').onclick=()=>location.href='main.html';
+document.getElementById('goSubmitLevel').onclick = ()=> location.href='submit-level.html';
+document.getElementById('goSubmitCompletion').onclick = ()=> location.href='submit-completion.html';
+document.getElementById('goSubmitAppeal').onclick = ()=> location.href='submit-appeal.html';
+document.getElementById('goMySubmissions').onclick = ()=> location.href='my-submissions.html';
+document.getElementById('back').onclick = ()=> location.href='main.html';
 </script>
 </body>
 </html>
