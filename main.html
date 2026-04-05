@@ -64,6 +64,11 @@ onAuthStateChanged(auth, async user => {
       if(d.id===user.uid) place = String(rank);
     });
     placeEl.textContent = `Место: ${place}`;
+    const msgSnap = await getDocs(query(collection(db,'moderator_messages'), where('playerId','==',user.uid)));
+    const messages = [];
+    msgSnap.forEach(d=>messages.push(d.data()));
+    messages.sort((a,b)=>(b.createdAt?.seconds ?? 0)-(a.createdAt?.seconds ?? 0));
+    messagesBox.innerHTML = `<h3 style="margin-top:0;">Сообщения от модераторов</h3>${messages.map(m=>`<div class="list-item"><b>${m.authorNick ?? 'модератор'}</b><p class="small">${m.text ?? ''}</p></div>`).join('') || '<p class="small">Пока нет сообщений.</p>'}`;
 
     document.getElementById('leaderboardBtn').onclick = ()=> location.href='leaderboard.html';
     document.getElementById('openLevelsMenu').onclick = ()=> location.href='levels-menu.html';
