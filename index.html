@@ -1,16 +1,52 @@
-<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8"><title>Вход</title><link rel="stylesheet" href="hud.css"></head><body>
-<div class="hud" style="max-width:420px;margin:80px auto;">
-  <h1>Вход</h1>
-  <input id="email" placeholder="Email"><br><br>
-  <input id="password" type="password" placeholder="Password"><br><br>
-  <div class="top-actions"><button id="login">Войти</button><button id="register">Регистрация</button></div>
-  <p id="error" style="color:#ff9cb1"></p>
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Login</title>
+<link rel="stylesheet" href="hud.css">
+</head>
+<body>
+
+<div class="hud" style="max-width:400px;margin:80px auto;">
+<h1>Вход</h1>
+<input id="email" placeholder="Email"><br><br>
+<input id="password" type="password" placeholder="Password"><br><br>
+<button id="login">Войти</button>
+<button id="register">Регистрация</button>
+<p id="error" style="color:red;"></p>
 </div>
+
 <script type="module">
 import { auth, db } from './firebase.js';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
 import { doc, setDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
-const emailEl=document.getElementById('email');const passEl=document.getElementById('password');const err=document.getElementById('error');
-document.getElementById('login').onclick=()=>{err.textContent='';signInWithEmailAndPassword(auth,emailEl.value,passEl.value).then(()=>location.href='nick.html').catch(()=>err.textContent='Ошибка входа');};
-document.getElementById('register').onclick=()=>{err.textContent='';createUserWithEmailAndPassword(auth,emailEl.value,passEl.value).then(u=>setDoc(doc(db,'users',u.user.uid),{role:'player',points:0,situation:'not requested'})).then(()=>location.href='nick.html').catch(()=>err.textContent='Ошибка регистрации');};
-</script></body></html>
+
+const errorEl = document.getElementById('error');
+
+login.onclick=()=>{
+  errorEl.textContent = '';
+  signInWithEmailAndPassword(auth,email.value,password.value)
+    .then(()=>location.href='nick.html')
+    .catch((e)=>{
+      console.error(e);
+      errorEl.textContent = 'Ошибка входа. Проверьте email и пароль.';
+    });
+};
+
+register.onclick=()=>{
+  errorEl.textContent = '';
+  createUserWithEmailAndPassword(auth,email.value,password.value)
+    .then(u=>setDoc(doc(db,'users',u.user.uid),{
+      role:'player',
+      points:0,
+      situation:'not requested'
+    }))
+    .then(()=>location.href='nick.html')
+    .catch((e)=>{
+      console.error(e);
+      errorEl.textContent = 'Ошибка регистрации. Попробуйте позже.';
+    });
+};
+</script>
+</body>
+</html>

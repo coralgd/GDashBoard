@@ -1,10 +1,68 @@
-<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8"><title>Мои отправки</title><link rel="stylesheet" href="hud.css"></head><body><div class="hud" style="max-width:800px"><h1>Мои отправки</h1><div class="top-actions"><button id="back">Назад</button></div><p id="status" style="color:#00ffff">Загрузка...</p><div id="list"></div></div>
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Мои отправки</title>
+<link rel="stylesheet" href="hud.css">
+<style>
+  .item { padding:10px; border:1px solid #2d8cff55; margin-bottom:8px; border-radius:8px; background:rgba(0,20,50,.35); }
+</style>
+</head>
+<body>
+<div class="hud" style="max-width:800px;margin:40px auto;">
+  <h1>Мои отправки и результаты</h1>
+  <div class="top-actions">
+    <button id="back">Назад</button>
+  </div>
+  <p id="status" style="color:#00ffff">Загрузка...</p>
+  <div id="list"></div>
+</div>
+
 <script type="module">
-import { auth, db, getNetworkErrorMessage } from './firebase.js';
+import { auth, db } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
 import { doc, getDoc, collection, getDocs, query, where } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
-const status=document.getElementById('status');
-function sort(arr){return arr.sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));}
-onAuthStateChanged(auth, async u=>{if(!u)return location.href='index.html';try{const me=await getDoc(doc(db,'users',u.uid));const p=me.exists()?me.data():null;if(!p||p.situation!=='verified') return location.href='nick.html';const [a,b,c]=await Promise.all([getDocs(query(collection(db,'level_submissions'),where('authorId','==',u.uid))),getDocs(query(collection(db,'completion_submissions'),where('playerId','==',u.uid))),getDocs(query(collection(db,'appeals'),where('playerId','==',u.uid)))]);const rows=[];a.forEach(d=>rows.push({type:'Уровень',...d.data()}));b.forEach(d=>rows.push({type:'Прохождение',...d.data()}));c.forEach(d=>rows.push({type:'Апелляция',...d.data()}));const list=document.getElementById('list');status.textContent='';const s=sort(rows);if(!s.length){status.textContent='Пока нет отправок.';return;}s.forEach(x=>{const div=document.createElement('div');div.className='list-item';div.innerHTML=`<b>${x.type}</b> · ${x.status??'pending'}<br>${x.note??''}`;list.appendChild(div);});}catch(e){status.textContent=getNetworkErrorMessage(e);}});
-document.getElementById('back').onclick=()=>location.href='main.html';
-</script></body></html>
+
+function sortByCreatedAtDesc(arr){
+  return arr.sort((a,b)=> (b.createdAt?.seconds||0) - (a.createdAt?.seconds||0));
+}
+
+onAuthStateChanged(auth, async u=>{
+  if(!u) return location.href='index.html';
+  const me = await getDoc(doc(db,'users',u.uid));
+  const profile = me.exists() ? me.data() : null;
+  if(!profile || profile.situation!=='verified') return location.href='nick.html';
+
+  const [levelsSnap, compSnap, appealsSnap] = await Promise.all([
+    getDocs(query(collection(db,'level_submissions'), where('authorId','==',u.uid))),
+    getDocs(query(collection(db,'completion_submissions'), where('playerId','==',u.uid))),
+    getDocs(query(collection(db,'appeals'), where('playerId','==',u.uid)))
+  ]);
+
+  const rows = [];
+  levelsSnap.forEach(d=>rows.push({type:'Уровень', ...d.data()}));
+  compSnap.forEach(d=>rows.push({type:'Прохождение', ...d.data()}));
+  appealsSnap.forEach(d=>rows.push({type:'Апелляция', ...d.data()}));
+
+  const list = document.getElementById('list');
+  const status = document.getElementById('status');
+  const sorted = sortByCreatedAtDesc(rows);
+  status.textContent = '';
+
+  if(!sorted.length){
+    status.textContent = 'Пока нет отправок.';
+    return;
+  }
+
+  sorted.forEach(x=>{
+    const div = document.createElement('div');
+    div.className='item';
+    div.innerHTML = `<b>${x.type}</b> · ${x.status ?? 'pending'}<br>${x.note ?? ''}`;
+    list.appendChild(div);
+  });
+});
+
+back.onclick = ()=> location.href='main.html';
+</script>
+</body>
+</html>

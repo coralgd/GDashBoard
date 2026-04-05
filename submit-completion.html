@@ -1,9 +1,56 @@
-<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8"><title>Отправка прохождения</title><link rel="stylesheet" href="hud.css"></head><body><div class="hud" style="max-width:700px"><h1>Отправить прохождение</h1><input id="link" placeholder="Ссылка"><br><br><textarea id="text" placeholder="Комментарий"></textarea><br><br><input id="fileUrl" placeholder="Файл (опц.)"><div class="top-actions"><button id="send">Отправить</button><button id="back">Назад</button></div><p id="msg"></p></div>
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Отправка прохождения</title>
+<link rel="stylesheet" href="hud.css">
+</head>
+<body>
+<div class="hud" style="max-width:700px;margin:50px auto;">
+  <h1>Отправить прохождение</h1>
+  <div class="card">
+    <input id="link" placeholder="Ссылка на доказательство" style="width:100%"><br><br>
+    <textarea id="text" placeholder="Комментарий" style="width:100%;min-height:120px"></textarea><br><br>
+    <input id="fileUrl" placeholder="Ссылка на файл (опционально)" style="width:100%"><br><br>
+    <div class="top-actions">
+      <button id="send">Отправить</button>
+      <button id="back">Назад</button>
+    </div>
+  </div>
+  <p id="msg" style="color:#00ffff"></p>
+</div>
+
 <script type="module">
-import { auth, db, getNetworkErrorMessage } from './firebase.js';
+import { auth, db } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
 import { doc, getDoc, addDoc, collection, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
-let user=null,profile=null;const msg=document.getElementById('msg');onAuthStateChanged(auth,async u=>{if(!u)return location.href='index.html';try{user=u;const s=await getDoc(doc(db,'users',u.uid));profile=s.exists()?s.data():null;if(!profile||profile.situation!=='verified') return location.href='nick.html';}catch(e){msg.textContent=getNetworkErrorMessage(e);}});
-document.getElementById('send').onclick=async()=>{const link=document.getElementById('link').value.trim();const text=document.getElementById('text').value.trim();const fileUrl=document.getElementById('fileUrl').value.trim();if(!link||!text){msg.textContent='Нужны ссылка и текст';return;}await addDoc(collection(db,'completion_submissions'),{playerId:user.uid,nick:profile.nick??'Без ника',link,text,fileUrl,status:'pending',note:'',awardedPoints:0,createdAt:serverTimestamp()});msg.textContent='Отправлено';};
-document.getElementById('back').onclick=()=>location.href='main.html';
-</script></body></html>
+
+let user = null;
+let profile = null;
+
+onAuthStateChanged(auth, async u=>{
+  if(!u) return location.href='index.html';
+  user = u;
+  const snap = await getDoc(doc(db,'users',u.uid));
+  profile = snap.exists() ? snap.data() : null;
+  if(!profile || profile.situation!=='verified') return location.href='nick.html';
+});
+
+send.onclick = async ()=>{
+  const link = document.getElementById('link').value.trim();
+  const text = document.getElementById('text').value.trim();
+  const fileUrl = document.getElementById('fileUrl').value.trim();
+  const msg = document.getElementById('msg');
+  if(!link || !text){ msg.textContent='Нужны ссылка и текст'; return; }
+
+  await addDoc(collection(db,'completion_submissions'), {
+    playerId:user.uid, nick:profile.nick ?? 'Без ника', link, text, fileUrl,
+    status:'pending', note:'', awardedPoints:0, createdAt:serverTimestamp()
+  });
+  msg.textContent='Прохождение отправлено модераторам.';
+};
+
+back.onclick = ()=> location.href='main.html';
+</script>
+</body>
+</html>
