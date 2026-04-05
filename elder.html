@@ -5,12 +5,14 @@
 <title>Панель старшего модератора</title>
 <link rel="stylesheet" href="hud.css">
 <style>
+  .panel{display:none}
+  .panel.active{display:block}
   .section{display:none}
   .section.active{display:block}
 </style>
 </head>
 <body>
-<div class="hud" style="max-width:1120px;margin:36px auto;">
+<div class="hud" style="max-width:1180px;margin:32px auto;">
   <div class="page-header">
     <h1 style="margin:0;">Панель старшего модератора</h1>
     <button id="backMain" class="btn-ghost">На главную</button>
@@ -18,16 +20,44 @@
   <p id="status" style="color:#00ffff;">Загрузка...</p>
   <div class="top-actions"><button id="goElderLevels" class="btn-hero">Меню листа</button></div>
 
-  <h2>Игроки</h2>
-  <div class="row small"><div>#</div><div>Ник</div><div>Очки</div></div>
-  <div id="users"></div>
+  <div class="top-actions">
+    <button id="goElderLevels" class="btn-hero">Меню листа</button>
+    <button id="tabUsers" class="btn-success">Игроки</button>
+    <button id="tabDeleting">Удаляемые</button>
+    <button id="clearMods" class="btn-danger">Очистить историю отправок у всех модеров</button>
+  </div>
+
+  <div id="usersPanel" class="panel active">
+    <h2>Игроки</h2>
+    <div class="row small"><div>#</div><div>Ник</div><div>Очки</div></div>
+    <div id="users"></div>
+  </div>
+
+  <div id="deletingPanel" class="panel">
+    <h2>Удаляемые аккаунты (восстановление в течение 2 дней)</h2>
+    <div id="deletingList"></div>
+  </div>
 </div>
 
-<div id="modal" class="dialog-backdrop">
+<div id="playerModal" class="dialog-backdrop">
   <div class="dialog" style="width:min(980px,95vw)">
     <div class="page-header">
-      <h2 id="modalTitle" style="margin:0;">Игрок</h2>
+      <h2 id="playerTitle" style="margin:0;">Игрок</h2>
       <button id="closeModal" class="btn-ghost">Закрыть</button>
+    </div>
+    <div id="profileSection" class="section active"></div>
+    <div id="submissionsSection" class="section"></div>
+  </div>
+</div>
+
+<div id="deleteConfirmModal" class="dialog-backdrop">
+  <div class="dialog" style="max-width:560px">
+    <h3>Подтверждение удаления</h3>
+    <p id="deleteConfirmText"></p>
+    <p class="small">После подтверждения аккаунт попадет в «Удаляемые» и окончательно удалится через 2 дня.</p>
+    <div class="top-actions">
+      <button id="confirmDelete" class="btn-danger">Подтвердить удаление</button>
+      <button id="cancelDelete" class="btn-ghost">Отмена</button>
     </div>
     <div id="profile" class="section active"></div>
     <div id="subs" class="section"></div>
@@ -39,78 +69,207 @@
 <script type="module">
 import { auth, db, getNetworkErrorMessage } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import { collection, deleteDoc, doc, getDoc, getDocs, orderBy, query, updateDoc, where } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, orderBy, query, serverTimestamp, Timestamp, updateDoc, where } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
 const statusEl = document.getElementById('status');
 const usersEl = document.getElementById('users');
-const modal = document.getElementById('modal');
-const profileEl = document.getElementById('profile');
-const subsEl = document.getElementById('subs');
+const deletingListEl = document.getElementById('deletingList');
+const playerModal = document.getElementById('playerModal');
+const profileSection = document.getElementById('profileSection');
+const submissionsSection = document.getElementById('submissionsSection');
 
 let openedUser = null;
-let userSubs = [];
+let pendingDeleteUser = null;
+let submissions = [];
+let allUsers = [];
+
+const TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000;
 
 document.getElementById('backMain').onclick = ()=> location.href='main.html';
 document.getElementById('goElderLevels').onclick = ()=> location.href='elder-levels.html';
-document.getElementById('closeModal').onclick = ()=> modal.classList.remove('open');
+document.getElementById('closeModal').onclick = ()=> playerModal.classList.remove('open');
+document.getElementById('cancelDelete').onclick = ()=> document.getElementById('deleteConfirmModal').classList.remove('open');
 
-function openSection(name){
-  profileEl.classList.toggle('active', name === 'profile');
-  subsEl.classList.toggle('active', name === 'subs');
+document.getElementById('tabUsers').onclick = ()=> setMainTab('users');
+document.getElementById('tabDeleting').onclick = ()=> setMainTab('deleting');
+
+function setMainTab(tab){
+  const isUsers = tab === 'users';
+  document.getElementById('usersPanel').classList.toggle('active', isUsers);
+  document.getElementById('deletingPanel').classList.toggle('active', !isUsers);
+  document.getElementById('tabUsers').classList.toggle('btn-success', isUsers);
+  document.getElementById('tabDeleting').classList.toggle('btn-success', !isUsers);
 }
 
-async function clearHistory(uid){
-  const [a,b,c] = await Promise.all([
+function setPlayerSection(section){
+  profileSection.classList.toggle('active', section==='profile');
+  submissionsSection.classList.toggle('active', section==='subs');
+}
+
+async function moveSubmissionsToTrash(user){
+  const uid = user.id;
+  const [levelsSnap, compSnap, appealSnap] = await Promise.all([
     getDocs(query(collection(db,'level_submissions'), where('authorId','==',uid))),
     getDocs(query(collection(db,'completion_submissions'), where('playerId','==',uid))),
     getDocs(query(collection(db,'appeals'), where('playerId','==',uid)))
   ]);
-  for(const d of a.docs) await deleteDoc(doc(db,'level_submissions', d.id));
-  for(const d of b.docs) await deleteDoc(doc(db,'completion_submissions', d.id));
-  for(const d of c.docs) await deleteDoc(doc(db,'appeals', d.id));
+
+  async function moveDocs(snapshot, type, colName){
+    for(const d of snapshot.docs){
+      await addDoc(collection(db,'submission_trash'), {
+        userId: uid,
+        userNick: user.nick ?? '',
+        type,
+        originalCollection: colName,
+        originalId: d.id,
+        payload: d.data(),
+        deletedAt: serverTimestamp(),
+        deletedBy: auth.currentUser?.uid ?? ''
+      });
+      await deleteDoc(doc(db,colName,d.id));
+    }
+  }
+
+  await moveDocs(levelsSnap, 'level', 'level_submissions');
+  await moveDocs(compSnap, 'completion', 'completion_submissions');
+  await moveDocs(appealSnap, 'appeal', 'appeals');
 }
 
-async function loadUserSubs(uid){
-  const [a,b,c] = await Promise.all([
-    getDocs(query(collection(db,'level_submissions'), where('authorId','==',uid))),
-    getDocs(query(collection(db,'completion_submissions'), where('playerId','==',uid))),
-    getDocs(query(collection(db,'appeals'), where('playerId','==',uid)))
-  ]);
-  userSubs = [];
-  a.forEach(d=>userSubs.push({ type:'level', ...d.data() }));
-  b.forEach(d=>userSubs.push({ type:'completion', ...d.data() }));
-  c.forEach(d=>userSubs.push({ type:'appeal', ...d.data() }));
+async function restoreSubmissionsFromTrash(userId){
+  const trashSnap = await getDocs(query(collection(db,'submission_trash'), where('userId','==',userId)));
+  for(const d of trashSnap.docs){
+    const x = d.data();
+    await addDoc(collection(db, x.originalCollection), x.payload);
+    await deleteDoc(doc(db,'submission_trash', d.id));
+  }
 }
 
-function renderSubsList(){
-  const q = document.getElementById('subQ').value.trim().toLowerCase();
-  const t = document.getElementById('subT').value;
-  const s = document.getElementById('subS').value;
+async function clearModeratorSubmissions(user){
+  if(user.role !== 'moderator'){
+    alert('По условию очищается только история отправок модераторов.');
+    return;
+  }
+  await moveSubmissionsToTrash(user);
+}
+
+function getDeleteDates(){
+  const now = Date.now();
+  const executeAt = new Date(now + TWO_DAYS_MS);
+  return {
+    requestedAt: Timestamp.fromDate(new Date(now)),
+    executeAt: Timestamp.fromDate(executeAt),
+    executeAtMs: executeAt.getTime()
+  };
+}
+
+async function scheduleDeleteAccount(user){
+  const dt = getDeleteDates();
+  await updateDoc(doc(db,'users',user.id), {
+    accountState: 'scheduled_delete',
+    deletionRequestedAt: dt.requestedAt,
+    deletionExecuteAt: dt.executeAt
+  });
+}
+
+async function cancelDeleteAccount(userId){
+  await updateDoc(doc(db,'users',userId), {
+    accountState: 'active',
+    deletionRequestedAt: null,
+    deletionExecuteAt: null
+  });
+
+async function processExpiredDeletes(){
+  const now = Date.now();
+  for(const u of allUsers){
+    if(u.accountState !== 'scheduled_delete') continue;
+    const executeMs = u.deletionExecuteAt?.toMillis?.() ?? 0;
+    if(executeMs > 0 && executeMs <= now){
+      await deleteDoc(doc(db,'users',u.id));
+    }
+  }
+}
+
+function renderDeletingList(){
+  deletingListEl.innerHTML = '';
+  const deleting = allUsers.filter(u=>u.accountState==='scheduled_delete');
+  if(!deleting.length){
+    deletingListEl.innerHTML = '<p>Пока нет удаляемых аккаунтов.</p>';
+    return;
+  }
+
+  const now = Date.now();
+  deleting.forEach(u=>{
+    const executeMs = u.deletionExecuteAt?.toMillis?.() ?? 0;
+    const leftMs = Math.max(0, executeMs - now);
+    const leftHours = Math.floor(leftMs / (60*60*1000));
+    const leftMinutes = Math.floor((leftMs % (60*60*1000)) / (60*1000));
+
+    const card = document.createElement('div');
+    card.className = 'list-item';
+    card.innerHTML = `
+      <b>${u.nick ?? 'Без ника'}</b>
+      <p class="small">Почта: ${u.email ?? '—'}</p>
+      <p class="small">До удаления: ${leftHours}ч ${leftMinutes}м</p>
+      <div class="top-actions">
+        <button class="restoreAccount btn-success">Восстановить аккаунт</button>
+        <button class="restoreSubs">Восстановить отправки</button>
+      </div>
+    `;
+
+    card.querySelector('.restoreAccount').onclick = async ()=>{
+      await cancelDeleteAccount(u.id);
+      await loadUsers();
+    };
+    card.querySelector('.restoreSubs').onclick = async ()=>{
+      await restoreSubmissionsFromTrash(u.id);
+      alert('Отправки восстановлены из корзины.');
+    };
+
+    deletingListEl.appendChild(card);
+  });
+}
+
+function renderSubs(){
+  const q = document.getElementById('subSearch').value.trim().toLowerCase();
+  const t = document.getElementById('subType').value;
+  const s = document.getElementById('subStatus').value;
   const box = document.getElementById('subList');
   box.innerHTML = '';
 
-  const filtered = userSubs.filter(x=>{
-    if(t !== 'all' && x.type !== t) return false;
-    if(s !== 'all' && x.status !== s) return false;
-    const hay = `${x.nick ?? ''} ${x.text ?? ''} ${x.status ?? ''} ${x.levelName ?? ''}`.toLowerCase();
+  const filtered = submissions.filter(x=>{
+    if(t!=='all' && x.type!==t) return false;
+    if(s!=='all' && x.status!==s) return false;
+    const hay = `${x.nick ?? ''} ${x.text ?? ''} ${x.status ?? ''}`.toLowerCase();
     return !q || hay.includes(q);
   });
 
   if(!filtered.length){ box.innerHTML = '<p>Отправки не найдены.</p>'; return; }
-
   filtered.forEach((x, i)=>{
     const row = document.createElement('div');
-    row.className = 'row list-item';
-    row.innerHTML = `<div>${i + 1}</div><div>[${x.type}] ${x.levelName ?? x.text ?? 'Без текста'}</div><div>${x.status ?? '—'}</div>`;
+    row.className='row list-item';
+    row.innerHTML = `<div>${i+1}</div><div>[${x.type}] ${x.levelName ?? x.text ?? 'Без текста'}</div><div>${x.status ?? '—'}</div>`;
     box.appendChild(row);
   });
 }
 
+async function loadSubmissionsForUser(uid){
+  const [a,b,c] = await Promise.all([
+    getDocs(query(collection(db,'level_submissions'), where('authorId','==',uid))),
+    getDocs(query(collection(db,'completion_submissions'), where('playerId','==',uid))),
+    getDocs(query(collection(db,'appeals'), where('playerId','==',uid)))
+  ]);
+
+  submissions=[];
+  a.forEach(d=>submissions.push({type:'level', ...d.data()}));
+  b.forEach(d=>submissions.push({type:'completion', ...d.data()}));
+  c.forEach(d=>submissions.push({type:'appeal', ...d.data()}));
+}
+
 async function openPlayer(user){
   openedUser = { ...user };
-  document.getElementById('modalTitle').textContent = openedUser.nick ?? 'Игрок';
+  document.getElementById('playerTitle').textContent = openedUser.nick ?? 'Игрок';
 
-  profileEl.innerHTML = `
+  profileSection.innerHTML = `
     <label class='small'>Ник</label>
     <input id='uNick' value='${openedUser.nick ?? ''}'>
     <label class='small'>Почта</label>
@@ -123,26 +282,29 @@ async function openPlayer(user){
       <option value='moderator'>moderator</option>
       <option value='elder'>elder</option>
     </select>
+
     <div class='top-actions'>
       <button id='uVerify'></button>
-      <button id='openSubsBtn'>Отправки</button>
-      <button id='uClear' class='btn-danger'>Очистить историю</button>
+      <button id='openSubs'>Отправки</button>
+      <button id='clearUserHistory' class='btn-danger'>Очистить историю отправок (только модератор)</button>
+      <button id='restoreUserHistory'>Восстановить отправки из корзины</button>
+      <button id='scheduleDelete' class='btn-danger'>Удалить аккаунт (через 2 дня)</button>
     </div>
   `;
   document.getElementById('uRole').value = openedUser.role ?? 'player';
-  document.getElementById('uVerify').textContent = openedUser.situation === 'verified' ? 'Снять верификацию' : 'Верифицировать';
+  document.getElementById('uVerify').textContent = openedUser.situation==='verified' ? 'Снять верификацию' : 'Верифицировать';
 
-  subsEl.innerHTML = `
+  submissionsSection.innerHTML = `
     <div class='top-actions'><button id='backProfile' class='btn-ghost'>Назад к профилю</button></div>
     <div class='toolbar'>
-      <input id='subQ' placeholder='Поиск отправок'>
-      <select id='subT'>
+      <input id='subSearch' placeholder='Поиск отправок'>
+      <select id='subType'>
         <option value='all'>Все типы</option>
         <option value='level'>Уровни</option>
         <option value='completion'>Прохождения</option>
         <option value='appeal'>Апелляции</option>
       </select>
-      <select id='subS'>
+      <select id='subStatus'>
         <option value='all'>Все статусы</option>
         <option value='approved'>Только успешные</option>
         <option value='pending'>Ожидают</option>
@@ -154,72 +316,106 @@ async function openPlayer(user){
 
   document.getElementById('uNick').onchange = async ()=>{
     const v = document.getElementById('uNick').value.trim();
-    await updateDoc(doc(db,'users', openedUser.id), { nick:v });
-    openedUser.nick = v;
-    document.getElementById('modalTitle').textContent = v || 'Игрок';
-    await renderUsers();
+    await updateDoc(doc(db,'users',openedUser.id), { nick:v });
+    await loadUsers();
+    document.getElementById('playerTitle').textContent = v || 'Игрок';
   };
   document.getElementById('uPoints').onchange = async ()=>{
     const v = Number(document.getElementById('uPoints').value || 0);
-    await updateDoc(doc(db,'users', openedUser.id), { points:v });
-    await renderUsers();
+    await updateDoc(doc(db,'users',openedUser.id), { points:v });
+    await loadUsers();
   };
   document.getElementById('uRole').onchange = async ()=>{
     const v = document.getElementById('uRole').value;
-    await updateDoc(doc(db,'users', openedUser.id), { role:v });
-    await renderUsers();
+    await updateDoc(doc(db,'users',openedUser.id), { role:v });
+    await loadUsers();
   };
   document.getElementById('uVerify').onclick = async ()=>{
     const next = openedUser.situation === 'verified' ? 'not requested' : 'verified';
-    await updateDoc(doc(db,'users', openedUser.id), { situation:next });
+    await updateDoc(doc(db,'users',openedUser.id), { situation:next });
+    await loadUsers();
     openedUser.situation = next;
-    document.getElementById('uVerify').textContent = next === 'verified' ? 'Снять верификацию' : 'Верифицировать';
-    await renderUsers();
-  };
-  document.getElementById('uClear').onclick = async ()=>{
-    if(!confirm('Удалить всю историю отправок игрока?')) return;
-    await clearHistory(openedUser.id);
-    userSubs = [];
-    alert('История очищена');
+    document.getElementById('uVerify').textContent = next==='verified' ? 'Снять верификацию' : 'Верифицировать';
   };
 
-  document.getElementById('backProfile').onclick = ()=> openSection('profile');
-  document.getElementById('subQ').oninput = renderSubsList;
-  document.getElementById('subT').onchange = renderSubsList;
-  document.getElementById('subS').onchange = renderSubsList;
-  document.getElementById('openSubsBtn').onclick = async ()=>{
-    const btn = document.getElementById('openSubsBtn');
-    btn.disabled = true;
-    try {
-      await loadUserSubs(openedUser.id);
-      renderSubsList();
-      openSection('subs');
-    } finally {
-      btn.disabled = false;
+  document.getElementById('clearUserHistory').onclick = async ()=>{
+    if(openedUser.role !== 'moderator'){
+      alert('По условию очищаем только отправки модераторов.');
+      return;
     }
+    if(!confirm('Очистить и отправить в корзину отправки этого модератора?')) return;
+    await clearModeratorSubmissions(openedUser);
+    alert('История модератора очищена и сохранена в корзине.');
   };
 
-  openSection('profile');
-  modal.classList.add('open');
+  document.getElementById('restoreUserHistory').onclick = async ()=>{
+    await restoreSubmissionsFromTrash(openedUser.id);
+    alert('Отправки восстановлены из корзины.');
+  };
+
+  document.getElementById('scheduleDelete').onclick = ()=>{
+    pendingDeleteUser = openedUser;
+    document.getElementById('deleteConfirmText').textContent = `Удалить аккаунт игрока ${openedUser.nick ?? 'Без ника'}?`;
+    document.getElementById('deleteConfirmModal').classList.add('open');
+  };
+
+  document.getElementById('backProfile').onclick = ()=> setPlayerSection('profile');
+  document.getElementById('subSearch').oninput = renderSubs;
+  document.getElementById('subType').onchange = renderSubs;
+  document.getElementById('subStatus').onchange = renderSubs;
+  document.getElementById('openSubs').onclick = async ()=>{
+    await loadSubmissionsForUser(openedUser.id);
+    renderSubs();
+    setPlayerSection('subs');
+  };
+
+  setPlayerSection('profile');
+  playerModal.classList.add('open');
 }
 
-async function renderUsers(){
+document.getElementById('confirmDelete').onclick = async ()=>{
+  if(!pendingDeleteUser) return;
+  await scheduleDeleteAccount(pendingDeleteUser);
+  document.getElementById('deleteConfirmModal').classList.remove('open');
+  playerModal.classList.remove('open');
+  pendingDeleteUser = null;
+  await loadUsers();
+};
+
+document.getElementById('clearMods').onclick = async ()=>{
+  if(!confirm('Очистить историю отправок у всех модераторов?')) return;
+  const moderators = allUsers.filter(u=>u.role==='moderator' && u.accountState!=='scheduled_delete');
+  for(const m of moderators){
+    await clearModeratorSubmissions(m);
+  }
+  alert('История отправок модераторов очищена и сохранена в корзине.');
+};
+
+async function loadUsers(){
   usersEl.innerHTML = 'Загрузка игроков...';
   const snap = await getDocs(query(collection(db,'users'), orderBy('points','desc')));
-  usersEl.innerHTML = '';
+  allUsers = [];
+  snap.forEach(d=>allUsers.push({id:d.id, ...d.data()}));
 
+  await processExpiredDeletes();
+
+  usersEl.innerHTML = '';
   let i = 1;
-  snap.forEach(d=>{
-    const u = d.data();
-    const row = document.createElement('div');
-    row.className = 'row list-item clickable';
-    if(u.role === 'moderator') row.classList.add('moderator');
-    if(u.role === 'elder') row.classList.add('elder');
-    if(u.situation !== 'verified') row.classList.add('unverified');
-    row.innerHTML = `<div>${i++}</div><div>${u.nick ?? 'Без ника'}</div><div>${Number(u.points ?? 0)}</div>`;
-    row.onclick = ()=> openPlayer({ id:d.id, ...u });
-    usersEl.appendChild(row);
-  });
+  allUsers
+    .filter(u=>u.accountState!=='scheduled_delete')
+    .forEach(u=>{
+      const row = document.createElement('div');
+      row.className = 'row list-item clickable';
+      if(u.role==='moderator') row.classList.add('moderator');
+      if(u.role==='elder') row.classList.add('elder');
+      if(u.situation!=='verified') row.classList.add('unverified');
+      row.innerHTML = `<div>${i++}</div><div>${u.nick ?? 'Без ника'}</div><div>${Number(u.points ?? 0)}</div>`;
+      row.onclick = ()=> openPlayer(u);
+      usersEl.appendChild(row);
+    });
+
+  if(!usersEl.children.length) usersEl.innerHTML = '<p>Нет игроков для отображения.</p>';
+  renderDeletingList();
 }
 
 onAuthStateChanged(auth, async user => {
@@ -230,9 +426,9 @@ onAuthStateChanged(auth, async user => {
     if(!me || me.situation !== 'verified') return location.href='nick.html';
     if(me.role !== 'elder') return location.href='main.html';
 
-    await renderUsers();
+    await loadUsers();
     statusEl.textContent = '';
-  } catch (e) {
+  } catch (e){
     console.error(e);
     statusEl.textContent = getNetworkErrorMessage(e);
   }
