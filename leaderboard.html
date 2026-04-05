@@ -120,6 +120,7 @@ function renderPlayers(){
     row.onclick = ()=> openPlayer(u);
     playersList.appendChild(row);
   });
+}
 
   if(!filtered.length) playersList.append(text('p', 'Игроки не найдены.'));
 }
@@ -157,6 +158,7 @@ function openPlayer(u){
     infoBody.append(text('p', 'Пока нет прохождений.'));
     return;
   }
+  infoBody.append(text('p', `Название: ${level.text ?? '—'}`), text('p', `Место: ${level.rank ?? '—'}`), linkP);
 
   passed.forEach(c => {
     const lv = c.levelId ? levels.find(x => x.id === c.levelId) : levels.find(x => Number(x.rank) === Number(c.listRank));
