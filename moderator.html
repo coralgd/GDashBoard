@@ -17,7 +17,10 @@
 <div class="hud" style="max-width:1150px;margin:40px auto;">
   <div class="page-header">
     <h1>Панель модератора</h1>
-    <button id="goListMenu" class="btn-hero">Меню листа</button>
+    <div class="top-actions" style="margin:0;">
+      <button id="toggleView" class="btn-hero">Меню листа</button>
+      <button id="openSendMenu" class="btn-success">Отправки</button>
+    </div>
   </div>
   <p id="status" style="color:#00ffff;">Загрузка...</p>
 
@@ -44,14 +47,19 @@ const statusEl = document.getElementById('status');
 const playersPanel = document.getElementById('playersPanel');
 const listMenuPanel = document.getElementById('listMenuPanel');
 const modal = document.getElementById('modal');
+const toggleViewBtn = document.getElementById('toggleView');
 let me = null;
+let currentPanel = 'players';
 
 function setPanel(name){
+  currentPanel = name;
   playersPanel.classList.toggle('active', name==='players');
   listMenuPanel.classList.toggle('active', name==='list');
+  toggleViewBtn.textContent = name === 'players' ? 'Меню листа' : 'Список игроков';
 }
 
-document.getElementById('goListMenu').onclick = ()=> setPanel('list');
+toggleViewBtn.onclick = ()=> setPanel(currentPanel === 'players' ? 'list' : 'players');
+document.getElementById('openSendMenu').onclick = ()=> location.href='levels-menu.html';
 document.getElementById('mClose').onclick = ()=> modal.classList.remove('open');
 
 function openLevelModal(level){
@@ -99,13 +107,11 @@ async function loadPlayers(){
   users.sort((a,b)=>String(a.nick ?? '').localeCompare(String(b.nick ?? ''),'ru'));
 
   playersPanel.innerHTML = `
-    <div class="page-header"><h2 style="margin:0">Верифицированные игроки</h2><button id="openPlayers" class="btn-ghost">Список игроков</button></div>
+    <div class="page-header"><h2 style="margin:0">Верифицированные игроки</h2></div>
     <label>Поиск по нику/роли</label>
     <input id="playerSearch" placeholder="Например: player, ivan">
     <div id="playerList"></div>
   `;
-
-  document.getElementById('openPlayers').onclick = ()=> setPanel('players');
 
   const list = document.getElementById('playerList');
   const render = ()=>{
@@ -148,12 +154,11 @@ async function loadListMenu(){
   levels.sort((a,b)=>Number(a.rank ?? 9999) - Number(b.rank ?? 9999));
 
   listMenuPanel.innerHTML = `
-    <div class="page-header"><h2 style="margin:0">Меню листа</h2><button id="backPlayers" class="btn-ghost">К игрокам</button></div>
+    <div class="page-header"><h2 style="margin:0">Меню листа</h2></div>
     <label>Поиск по уровню</label>
     <input id="levelSearch" placeholder="Название, ранг, ссылка">
     <div id="levelList"></div>
   `;
-  document.getElementById('backPlayers').onclick = ()=> setPanel('players');
 
   const list = document.getElementById('levelList');
   const render = ()=>{
