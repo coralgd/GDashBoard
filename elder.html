@@ -8,8 +8,8 @@
   .user-card{cursor:pointer}
   .user-card:hover{outline:1px solid rgba(32,245,204,.7)}
   .unverified{color:#8c97a8;opacity:.65}
-  .panel{display:none}
-  .panel.active{display:block}
+  .modal-section{display:none}
+  .modal-section.active{display:block}
 </style>
 </head>
 <body>
@@ -34,14 +34,9 @@
       <h2 id="playerModalTitle" style="margin:0;">Игрок</h2>
       <button id="closePlayerModal" class="btn-ghost">Закрыть</button>
     </div>
-    <div class="tabs" style="grid-template-columns:repeat(3,minmax(0,1fr));">
-      <button data-player-tab="profile">Профиль</button>
-      <button data-player-tab="submissions">Отправки</button>
-      <button data-player-tab="approved">Успешные</button>
-    </div>
-    <div id="playerTabProfile" class="panel active"></div>
-    <div id="playerTabSubmissions" class="panel"></div>
-    <div id="playerTabApproved" class="panel"></div>
+
+    <div id="profileSection" class="modal-section active"></div>
+    <div id="submissionsSection" class="modal-section"></div>
   </div>
 </div>
 
@@ -53,70 +48,118 @@ import { collection, query, orderBy, where, getDocs, doc, updateDoc, getDoc } fr
 const statusEl = document.getElementById('status');
 const usersEl = document.getElementById('users');
 const modal = document.getElementById('playerModal');
-let meUid = null;
 
 document.getElementById('backMain').onclick = ()=> location.href='main.html';
 document.getElementById('goElderLevels').onclick = ()=> location.href='elder-levels.html';
 document.getElementById('closePlayerModal').onclick = ()=> modal.classList.remove('open');
 
-document.querySelectorAll('[data-player-tab]').forEach(btn=>btn.onclick=()=>{
-  document.querySelectorAll('#playerModal .panel').forEach(p=>p.classList.remove('active'));
-  document.querySelectorAll('[data-player-tab]').forEach(b=>b.classList.remove('active'));
-  document.getElementById(`playerTab${btn.dataset.playerTab[0].toUpperCase()}${btn.dataset.playerTab.slice(1)}`).classList.add('active');
-  btn.classList.add('active');
-});
-document.querySelector('[data-player-tab="profile"]').classList.add('active');
+function switchModalSection(name){
+  document.getElementById('profileSection').classList.toggle('active', name==='profile');
+  document.getElementById('submissionsSection').classList.toggle('active', name==='submissions');
+}
 
 async function openPlayerModal(userDoc){
   const { id, data } = userDoc;
   document.getElementById('playerModalTitle').textContent = data.nick ?? 'Игрок';
-  const profile = document.getElementById('playerTabProfile');
-  const submissions = document.getElementById('playerTabSubmissions');
-  const approved = document.getElementById('playerTabApproved');
+
+  const profile = document.getElementById('profileSection');
+  const submissions = document.getElementById('submissionsSection');
 
   profile.innerHTML = `
-    <p><b>Роль:</b> ${data.role ?? 'player'}</p>
-    <p><b>Верификация:</b> ${data.situation ?? 'not requested'}</p>
+    <input id="modalNick" value="${data.nick ?? ''}" placeholder="Ник">
+    <input id="modalEmail" value="${data.email ?? ''}" placeholder="Почта" readonly>
     <input id="modalPoints" type="number" value="${Number(data.points ?? 0)}" placeholder="Очки">
+    <select id="modalRole">
+      <option value="player" ${data.role==='player' || !data.role ? 'selected' : ''}>player</option>
+      <option value="moderator" ${data.role==='moderator' ? 'selected' : ''}>moderator</option>
+      <option value="elder" ${data.role==='elder' ? 'selected' : ''}>elder</option>
+    </select>
+    <select id="modalSituation">
+      <option value="verified" ${data.situation==='verified' ? 'selected' : ''}>verified</option>
+      <option value="not requested" ${data.situation==='not requested' ? 'selected' : ''}>not requested</option>
+    </select>
     <div class="top-actions">
-      <button id="savePoints">Сохранить очки</button>
-      <button id="toggleRole">${data.role==='moderator' ? 'Снять модерку' : 'Назначить модером'}</button>
-      <button id="toggleVer">${data.situation==='verified' ? 'Снять верифку' : 'Верифицировать'}</button>
+      <button id="saveProfile">Сохранить</button>
+      <button id="openSubs">Отправки</button>
     </div>
   `;
 
-  document.getElementById('savePoints').onclick = async ()=>{
-    await updateDoc(doc(db,'users',id), { points:Number(document.getElementById('modalPoints').value) });
-  };
-  document.getElementById('toggleRole').onclick = async ()=>{
-    const newRole = data.role==='moderator' ? 'player' : 'moderator';
-    await updateDoc(doc(db,'users',id), { role:newRole });
-    data.role = newRole;
-    document.getElementById('toggleRole').textContent = data.role==='moderator' ? 'Снять модерку' : 'Назначить модером';
-  };
-  document.getElementById('toggleVer').onclick = async ()=>{
-    const newSit = data.situation==='verified' ? 'not requested' : 'verified';
-    await updateDoc(doc(db,'users',id), { situation:newSit });
-    data.situation = newSit;
-    document.getElementById('toggleVer').textContent = data.situation==='verified' ? 'Снять верифку' : 'Верифицировать';
+  document.getElementById('saveProfile').onclick = async ()=>{
+    await updateDoc(doc(db,'users',id), {
+      nick: document.getElementById('modalNick').value.trim(),
+      points: Number(document.getElementById('modalPoints').value),
+      role: document.getElementById('modalRole').value,
+      situation: document.getElementById('modalSituation').value
+    });
+    document.getElementById('playerModalTitle').textContent = document.getElementById('modalNick').value.trim() || 'Игрок';
   };
 
-  const [levelSubs, compSubs] = await Promise.all([
+  document.getElementById('openSubs').onclick = ()=>{
+    switchModalSection('submissions');
+  };
+
+  const [levelSubs, compSubs, appealSubs] = await Promise.all([
     getDocs(query(collection(db,'level_submissions'), where('authorId','==',id))),
-    getDocs(query(collection(db,'completion_submissions'), where('playerId','==',id)))
+    getDocs(query(collection(db,'completion_submissions'), where('playerId','==',id))),
+    getDocs(query(collection(db,'appeals'), where('playerId','==',id)))
   ]);
 
-  const all = [];
-  levelSubs.forEach(d=>all.push({type:'Уровень', status:d.data().status ?? '—', text:d.data().text ?? ''}));
-  compSubs.forEach(d=>all.push({type:'Прохождение', status:d.data().status ?? '—', text:d.data().text ?? ''}));
-  submissions.innerHTML = all.length ? all.map(x=>`<div class="row"><b>${x.type}</b> · ${x.status}<br>${x.text}</div>`).join('') : '<p>Нет отправок.</p>';
+  const allSubs = [];
+  levelSubs.forEach(d=>allSubs.push({type:'level', ...d.data()}));
+  compSubs.forEach(d=>allSubs.push({type:'completion', ...d.data()}));
+  appealSubs.forEach(d=>allSubs.push({type:'appeal', ...d.data()}));
 
-  const approvedItems = [];
-  compSubs.forEach(d=>{ if(d.data().status==='approved') approvedItems.push(d.data()); });
-  approved.innerHTML = approvedItems.length
-    ? approvedItems.map(x=>`<div class="row"><b>+${Number(x.awardedPoints ?? 0)} очков</b><br>${x.text ?? ''}</div>`).join('')
-    : '<p>Нет успешных прохождений.</p>';
+  submissions.innerHTML = `
+    <div class="top-actions">
+      <button id="backToProfile" class="btn-ghost">Назад к профилю</button>
+    </div>
+    <div class="toolbar">
+      <input id="subSearch" placeholder="Поиск отправок">
+      <select id="subType">
+        <option value="all">Все типы</option>
+        <option value="level">Уровни</option>
+        <option value="completion">Прохождения</option>
+        <option value="appeal">Апелляции</option>
+      </select>
+      <select id="subStatus">
+        <option value="all">Все статусы</option>
+        <option value="approved">Только успешные</option>
+      </select>
+    </div>
+    <div id="subList"></div>
+  `;
 
+  document.getElementById('backToProfile').onclick = ()=>switchModalSection('profile');
+
+  function renderSubs(){
+    const q = document.getElementById('subSearch').value.trim().toLowerCase();
+    const t = document.getElementById('subType').value;
+    const s = document.getElementById('subStatus').value;
+    const box = document.getElementById('subList');
+    box.innerHTML = '';
+
+    const filtered = allSubs.filter(x=>{
+      if(t !== 'all' && x.type !== t) return false;
+      if(s !== 'all' && x.status !== s) return false;
+      const hay = `${x.text ?? ''} ${x.status ?? ''} ${x.nick ?? ''}`.toLowerCase();
+      return !q || hay.includes(q);
+    });
+
+    if(!filtered.length){ box.innerHTML = '<p>Отправки не найдены.</p>'; return; }
+    filtered.forEach(x=>{
+      const row = document.createElement('div');
+      row.className='row';
+      row.innerHTML = `<b>[${x.type}]</b> ${x.status ?? '—'}<br>${x.text ?? ''}`;
+      box.appendChild(row);
+    });
+  }
+
+  document.getElementById('subSearch').oninput = renderSubs;
+  document.getElementById('subType').onchange = renderSubs;
+  document.getElementById('subStatus').onchange = renderSubs;
+  renderSubs();
+
+  switchModalSection('profile');
   modal.classList.add('open');
 }
 
@@ -133,7 +176,7 @@ async function loadUsers(){
     if(u.role==='moderator') row.classList.add('moderator');
     if(u.role==='elder') row.classList.add('elder');
     if(u.situation!=='verified') row.classList.add('unverified');
-    row.innerHTML = `<b>${u.nick ?? 'Без ника'}</b> · ${u.role ?? 'player'} · ${u.situation ?? 'not requested'}<br><span class="small">Очки: ${Number(u.points ?? 0)}</span>`;
+    row.innerHTML = `<div>${u.nick ?? 'Без ника'}</div><div></div><div>${Number(u.points ?? 0)}</div>`;
     row.onclick = ()=>openPlayerModal({id:d.id, data:u});
     usersEl.appendChild(row);
   });
