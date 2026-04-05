@@ -21,6 +21,7 @@
     <div class="stat"><div class="small">Верифицированных игроков</div><b id="statPlayers">—</b></div>
     <div class="stat"><div class="small">Уровней в листе</div><b id="statLevels">—</b></div>
   </div>
+  <p id="status" style="color:#00ffff;margin:8px 0 10px;">Загрузка...</p>
 
   <div class="tabs">
     <button data-tab="players">Игроки</button>
@@ -65,6 +66,7 @@ const levelSearch = document.getElementById('levelSearch');
 const levelSort = document.getElementById('levelSort');
 const statPlayers = document.getElementById('statPlayers');
 const statLevels = document.getElementById('statLevels');
+const statusEl = document.getElementById('status');
 
 let currentUid = null;
 let usersCache = [];
@@ -213,12 +215,18 @@ document.getElementById('backMain').onclick = ()=> location.href='main.html';
 
 onAuthStateChanged(auth, async u=>{
   if(!u) return location.href='index.html';
-  const meSnap = await getDoc(doc(db,'users',u.uid));
-  const me = meSnap.exists() ? meSnap.data() : null;
-  if(!me || me.situation!=='verified') return location.href='nick.html';
-  currentUid = u.uid;
-  await refreshUsers();
-  await refreshLevels();
+  try{
+    const meSnap = await getDoc(doc(db,'users',u.uid));
+    const me = meSnap.exists() ? meSnap.data() : null;
+    if(!me || me.situation!=='verified') return location.href='nick.html';
+    currentUid = u.uid;
+    await refreshUsers();
+    await refreshLevels();
+    statusEl.textContent = '';
+  } catch (e){
+    console.error(e);
+    statusEl.textContent = 'Не удалось загрузить лидерборд.';
+  }
 });
 </script>
 </body>
