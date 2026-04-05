@@ -312,6 +312,7 @@ async function loadPendingCompletions(){
   if(snap.empty){ box.innerHTML='<p>Нет заявок.</p>'; return; }
   box.innerHTML='';
 
+  box.innerHTML='';
   snap.forEach(d=>{
     const s=d.data();
     const row=document.createElement('div');
@@ -339,6 +340,38 @@ async function loadPendingCompletions(){
 
     box.appendChild(row);
   });
+}
+
+function renderArchiveSection(title, items){
+  let html = `<h3>${title}</h3>`;
+  if(!items.length) return html + '<p class="small">Пусто.</p>';
+  items
+    .sort((a,b)=>(b.reviewedAt?.seconds ?? 0)-(a.reviewedAt?.seconds ?? 0))
+    .forEach(x=>{
+      html += `<div class="row"><b>${x.nick ?? 'Без ника'}</b><p>${x.text ?? ''}</p><p class="small">status=${x.status ?? '—'} · note=${x.note ?? '—'} · ref=${x.referenceSubmissionId ?? '—'}</p></div>`;
+    });
+  return html;
+}
+
+async function loadArchive(){
+  const box = document.getElementById('archive');
+  box.innerHTML = 'Загрузка архива...';
+
+  const [ls, cs, ap] = await Promise.all([
+    getDocs(collection(db,'level_submissions')),
+    getDocs(collection(db,'completion_submissions')),
+    getDocs(collection(db,'appeals'))
+  ]);
+
+  const levels = []; const completions = []; const appeals = [];
+  ls.forEach(d=>{ const x=d.data(); if(x.status && x.status!=='pending') levels.push(x); });
+  cs.forEach(d=>{ const x=d.data(); if(x.status && x.status!=='pending') completions.push(x); });
+  ap.forEach(d=>{ const x=d.data(); if(x.status && x.status!=='pending') appeals.push(x); });
+
+  box.innerHTML =
+    renderArchiveSection('Архив уровней', levels) +
+    renderArchiveSection('Архив прохождений', completions) +
+    renderArchiveSection('Архив апелляций', appeals);
 }
 
 onAuthStateChanged(auth, async user => {
