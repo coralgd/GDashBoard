@@ -93,6 +93,7 @@ function setTab(id){
   document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
   document.getElementById(id).classList.add('active');
   document.querySelectorAll('.tabs button').forEach(btn=>btn.classList.toggle('active', btn.dataset.tab===id));
+  history.replaceState(null, '', `#${id}`);
 }
 
 function calculateCompletionPoints(listRank, listSize, approvedCompletionsCount, scoringSettings){
@@ -143,6 +144,9 @@ function renderPlayers(){
     row.innerHTML = `<div>${displayRank}</div><div>${escapeHtml(data.nick ?? 'Без ника')}</div><div>${Number(data.points ?? 0)}</div>`;
     playersList.appendChild(row);
   });
+  statPlayers.textContent = String(usersCache.length);
+  renderPlayers();
+}
 
   if(!playersList.childElementCount) playersList.innerHTML = '<p>Ничего не найдено.</p>';
 }
