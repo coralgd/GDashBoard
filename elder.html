@@ -31,17 +31,12 @@
     <button data-tab="manualLevel">Поставить уровень</button>
   </div>
 
-  <div id="users" class="panel active"></div>
-  <div id="settings" class="panel">
-    <div class="row">
-      <b>Настройка формулы очков</b>
-      <input id="maximumPoints" type="number" step="1" min="1" placeholder="maximumPoints (например 100)">
-      <input id="rankDecayFactor" type="number" step="0.1" min="0" placeholder="rankDecayFactor (например 3)">
-      <input id="repeatPenaltyPower" type="number" step="0.01" min="0" placeholder="repeatPenaltyPower (например 0.5)">
-      <p class="small">Формула: points = maximumPoints * e^(-rankDecayFactor*x) * 1/(k^repeatPenaltyPower), x=(rank-1)/(quantity-1)</p>
-      <button id="saveSettings">Сохранить параметры</button>
-      <p id="settingsMsg" class="small"></p>
+    <div class="top-actions">
+      <button id="goLevels">Меню листа</button>
     </div>
+
+    <div class="row small"><div>#</div><div>Ник</div><div>Очки</div></div>
+    <div id="users"></div>
   </div>
   <div id="appeals" class="panel"></div>
   <div id="levelSubmissions" class="panel"></div>
@@ -59,7 +54,6 @@
       <p id="mMsg" class="small"></p>
     </div>
   </div>
-</div>
 
 <script type="module">
 import { auth, db } from './firebase.js';
@@ -229,81 +223,17 @@ async function loadLevelSubmissions(elder){
         addedBy:elder.uid, addedByNick:elder.nick ?? 'elder', createdAt:serverTimestamp(),
         sourceSubmissionId:d.id, status:'active'
       });
-      await updateDoc(doc(db,'level_submissions',d.id), {
-        status:'approved', note, reviewedBy:elder.uid, reviewedAt:serverTimestamp(), finalRank:rank
-      });
-      row.remove();
-    };
 
-    row.querySelector('.reject').onclick = async ()=>{
-      const note = row.querySelector('.note').value.trim() || 'Отклонено старшим модератором';
-      await updateDoc(doc(db,'level_submissions',d.id), {
-        status:'rejected', note, reviewedBy:elder.uid, reviewedAt:serverTimestamp()
-      });
-      row.remove();
-    };
-  });
-}
+      if (!filtered.length) {
+        box.innerHTML = '<p>Нет отправок.</p>';
+        return;
+      }
 
-async function loadCompletionSubmissions(elder){
-  const box = document.getElementById('completionSubmissions');
-  box.innerHTML = 'Загрузка заявок прохождений...';
-  const snap = await getDocs(query(collection(db,'completion_submissions'), where('status','==','pending')));
-  if(snap.empty){ box.innerHTML='<p>Нет заявок.</p>'; return; }
-
-  const levelsSnap = await getDocs(collection(db,'levels'));
-  const levels = [];
-  levelsSnap.forEach(d=>levels.push({id:d.id, ...d.data()}));
-  const quantity = Math.max(levels.length, 2);
-  const scoreCfg = await getScoring();
-  box.innerHTML = '';
-
-  snap.forEach(d=>{
-    const s = d.data();
-    const row = document.createElement('div');
-    row.className='row';
-    row.innerHTML = `
-      <b>${s.nick ?? 'Без ника'}</b><br>
-      <a href="${s.link}" target="_blank">Доказательство</a>
-      <p>${s.text ?? ''}</p>
-      <p class="small">Файл: ${s.fileUrl || '—'}</p>
-      <input type="number" min="1" max="${quantity}" placeholder="Место уровня в листе" class="rank">
-      <input placeholder="Комментарий" class="note">
-      <div class="top-actions">
-        <button class="approve">Подтвердить прохождение</button>
-        <button class="reject btn-danger">Отклонить</button>
-      </div>
-    `;
-    box.appendChild(row);
-
-    row.querySelector('.approve').onclick = async ()=>{
-      const note = row.querySelector('.note').value.trim();
-      const rank = Number(row.querySelector('.rank').value);
-      if(!rank){ alert('Укажи место уровня'); return; }
-
-      const userRef = doc(db,'users',s.playerId);
-      const userSnap = await getDoc(userRef);
-      const u = userSnap.exists() ? userSnap.data() : null;
-      if(!u){ alert('Игрок не найден'); return; }
-
-      const userComps = await getDocs(query(collection(db,'completion_submissions'), where('playerId','==',s.playerId)));
-      let approvedCount = 0;
-      userComps.forEach(x=>{ if(x.data().status==='approved') approvedCount++; });
-      const k = approvedCount + 1;
-      const earned = calculateCompletionPoints(rank, quantity, k, scoreCfg);
-
-      await updateDoc(userRef, { points:Number(u.points ?? 0) + earned });
-      await updateDoc(doc(db,'completion_submissions',d.id), {
-        status:'approved', note, reviewedBy:elder.uid, reviewedAt:serverTimestamp(),
-        awardedPoints:earned, listRank:rank, listQuantity:quantity, scoreK:k
-      });
-      row.remove();
-    };
-
-    row.querySelector('.reject').onclick = async ()=>{
-      const note = row.querySelector('.note').value.trim() || 'Отклонено старшим модератором';
-      await updateDoc(doc(db,'completion_submissions',d.id), {
-        status:'rejected', note, reviewedBy:elder.uid, reviewedAt:serverTimestamp()
+      filtered.forEach((x, i) => {
+        const row = document.createElement('div');
+        row.className = 'row list-item';
+        row.innerHTML = `<div>${i + 1}</div><div>[${x.type}] ${x.text ?? '—'}</div><div>${x.status ?? '—'}</div>`;
+        box.appendChild(row);
       });
       row.remove();
     };
@@ -356,13 +286,24 @@ onAuthStateChanged(auth, async user=>{
         addedBy:user.uid, addedByNick:me.nick ?? 'elder', createdAt:serverTimestamp(),
         status:'active', sourceSubmissionId:null
       });
-      msg.textContent = 'Уровень добавлен в лист.';
-    };
-  } catch (e) {
-    console.error(e);
-    statusEl.textContent = 'Не удалось загрузить панель старшего модератора.';
-  }
-});
-</script>
+    }
+
+    onAuthStateChanged(auth, async user => {
+      if (!user) return location.href = 'index.html';
+
+      try {
+        const meSnap = await getDoc(doc(db, 'users', user.uid));
+        const me = meSnap.exists() ? meSnap.data() : null;
+
+        if (!me || me.situation !== 'verified') return location.href = 'nick.html';
+        if (me.role !== 'elder') return location.href = 'main.html';
+
+        await loadUsers();
+        status.textContent = '';
+      } catch (e) {
+        status.textContent = getNetworkErrorMessage(e);
+      }
+    });
+  </script>
 </body>
 </html>
