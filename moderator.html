@@ -38,7 +38,7 @@
       <div class="card">
         <button id="toggleView" class="toolbar-btn btn-hero">Меню листа</button>
         <button id="openSubmissions" class="toolbar-btn btn-success">Отправки</button>
-        <button id="openSendMenu" class="toolbar-btn btn-ghost">Отправить</button>
+        <button id="openAddLevel" class="toolbar-btn">Добавить</button>
       </div>
     </aside>
   </div>
@@ -66,6 +66,33 @@
   </div>
 </div>
 
+<div id="addLevelModal" class="dialog-backdrop">
+  <div class="dialog" style="width:min(760px,96vw);">
+    <div class="page-header">
+      <h2 style="margin:0">Добавить уровень</h2>
+      <button id="closeAddLevel" class="btn-ghost">Закрыть</button>
+    </div>
+    <div class="card">
+      <label>Название уровня</label>
+      <textarea id="addLevelText" placeholder="Название"></textarea>
+      <label>Ссылка</label>
+      <input id="addLevelLink" placeholder="https://...">
+      <label>Файл (необязательно)</label>
+      <input id="addLevelFile" placeholder="URL файла">
+      <label>Строитель</label>
+      <input id="addLevelBuilder" placeholder="Ник строителя">
+      <label>Верифер</label>
+      <input id="addLevelVerifier" placeholder="Ник верифера">
+      <label>Место в листе</label>
+      <input id="addLevelRank" type="number" min="1" placeholder="Например 15">
+      <div class="top-actions">
+        <button id="submitAddLevel" class="btn-success">Добавить</button>
+      </div>
+      <p id="addLevelMsg" class="small"></p>
+    </div>
+  </div>
+</div>
+
 <script type="module">
 import { auth, db, getNetworkErrorMessage } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
@@ -76,6 +103,7 @@ const playersPanel = document.getElementById('playersPanel');
 const listMenuPanel = document.getElementById('listMenuPanel');
 const modal = document.getElementById('modal');
 const submissionsModal = document.getElementById('submissionsModal');
+const addLevelModal = document.getElementById('addLevelModal');
 const toggleViewBtn = document.getElementById('toggleView');
 let me = null;
 let currentPanel = 'players';
@@ -97,9 +125,13 @@ document.getElementById('openSubmissions').onclick = async ()=>{
   renderPendingSubmissions();
   submissionsModal.classList.add('open');
 };
-document.getElementById('openSendMenu').onclick = ()=> location.href='levels-menu.html';
+document.getElementById('openAddLevel').onclick = ()=>{
+  document.getElementById('addLevelMsg').textContent = '';
+  addLevelModal.classList.add('open');
+};
 document.getElementById('mClose').onclick = ()=> modal.classList.remove('open');
 document.getElementById('closeSubmissions').onclick = ()=> submissionsModal.classList.remove('open');
+document.getElementById('closeAddLevel').onclick = ()=> addLevelModal.classList.remove('open');
 
 function calcPoints(rank, size, k=1){
   const n = Math.max(2, Number(size || 2));
@@ -110,6 +142,20 @@ function calcPoints(rank, size, k=1){
 
 function formatDate(ts){
   return ts?.seconds ? new Date(ts.seconds * 1000).toLocaleString('ru-RU') : '—';
+}
+
+async function logModeratorAction(action, details = {}){
+  if(!me?.uid) return;
+  try {
+    await addDoc(collection(db,'moderator_actions'), {
+      action,
+      details,
+      actorUid: me.uid,
+      actorNick: me.nick ?? 'moderator',
+      actorRole: 'moderator',
+      createdAt: serverTimestamp()
+    });
+  } catch (_) {}
 }
 
 async function loadScoring(){
@@ -167,6 +213,7 @@ function openLevelModal(level){
         status: 'pending',
         createdAt: serverTimestamp()
       });
+      await logModeratorAction('request_level_review', { levelId: level.id, levelRank: Number(level.rank ?? 0) || null });
       msg.textContent = 'Заявка отправлена старшему модератору.';
     } catch (e) {
       msg.textContent = getNetworkErrorMessage(e);
@@ -177,46 +224,127 @@ function openLevelModal(level){
 
 async function loadPlayers(){
   const [usersSnap] = await Promise.all([
-    getDocs(query(collection(db,'users'), where('situation','==','verified')))
+    getDocs(query(collection(db,'users'), where('situation','in',['verified','freezed'])))
   ]);
 
   const users = [];
-  usersSnap.forEach(d=>users.push({id:d.id,...d.data()}));
+  usersSnap.forEach(d=>{
+    const u = d.data();
+    if(u.role==='moderator' || u.role==='elder') return;
+    users.push({id:d.id,...u});
+  });
   users.sort((a,b)=>String(a.nick ?? '').localeCompare(String(b.nick ?? ''),'ru'));
 
   playersPanel.innerHTML = `
     <div class="page-header"><h2 style="margin:0">Верифицированные игроки</h2></div>
-    <label>Поиск по нику/роли</label>
-    <input id="playerSearch" placeholder="Например: player, ivan">
+    <label>Поиск по нику</label>
+    <input id="playerSearch" placeholder="Например: ivan">
+    <div class="row small"><div>#</div><div>Ник</div><div>Очки</div></div>
     <div id="playerList"></div>
   `;
 
   const list = document.getElementById('playerList');
+  const openPlayerProfile = async (playerId)=>{
+    const player = users.find(x=>x.id===playerId);
+    if(!player) return;
+    const [compSnap, levelSubsSnap, appealsSnap, msgSnap] = await Promise.all([
+      getDocs(query(collection(db,'completion_submissions'), where('playerId','==',playerId))),
+      getDocs(query(collection(db,'level_submissions'), where('authorId','==',playerId))),
+      getDocs(query(collection(db,'appeals'), where('playerId','==',playerId))),
+      getDocs(query(collection(db,'moderator_messages'), where('playerId','==',playerId)))
+    ]);
+    const completions = [];
+    const allSubs = [];
+    compSnap.forEach(d=>{ const x={id:d.id,type:'completion',...d.data()}; completions.push(x); allSubs.push(x); });
+    levelSubsSnap.forEach(d=> allSubs.push({id:d.id,type:'level',...d.data()}));
+    appealsSnap.forEach(d=> allSubs.push({id:d.id,type:'appeal',...d.data()}));
+    const messages = [];
+    msgSnap.forEach(d=>messages.push({id:d.id,...d.data()}));
+    allSubs.sort((a,b)=>(b.createdAt?.seconds ?? 0)-(a.createdAt?.seconds ?? 0));
+    messages.sort((a,b)=>(b.createdAt?.seconds ?? 0)-(a.createdAt?.seconds ?? 0));
+    const approved = completions.filter(x=>x.status==='approved');
+
+    document.getElementById('mTitle').textContent = `Игрок: ${player.nick ?? 'Без ника'}`;
+    document.getElementById('mBody').innerHTML = `
+      <div class="card">
+        <p><b>Ник:</b> ${player.nick ?? 'Без ника'}</p>
+        <p><b>Почта:</b> ${player.email ?? '—'}</p>
+        <label>Очки</label>
+        <input id="playerPointsInput" type="number" value="${Number(player.points ?? 0)}">
+        <div class="top-actions"><button id="savePlayerPoints">Сохранить очки</button></div>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Прохождения (как в лидерборде)</h3>
+        ${approved.map(c=>`<div class="list-item clickable" data-open-sub="${c.id}"><b>${c.levelText ?? 'Уровень'}</b><p class="small">Очки: ${Number(c.awardedPoints ?? 0)} · ${formatDate(c.reviewedAt)}</p></div>`).join('') || '<p>Нет подтверждённых прохождений.</p>'}
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Все отправки игрока (вкл. апелляции)</h3>
+        ${allSubs.map(s=>`<div class="list-item"><b>[${s.type}]</b> ${s.status ?? 'pending'} · ${formatDate(s.createdAt)}<p class="small">${s.text ?? '—'}</p></div>`).join('') || '<p>История пуста.</p>'}
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Сообщения игроку</h3>
+        <textarea id="modMessageText" placeholder="Напиши сообщение игроку"></textarea>
+        <div class="top-actions"><button id="sendModMessage">Отправить сообщение</button></div>
+        ${messages.map(m=>`<div class="list-item"><b>${m.authorNick ?? 'модератор'}</b> · ${formatDate(m.createdAt)}<p>${m.text ?? ''}</p></div>`).join('') || '<p class="small">Сообщений пока нет.</p>'}
+      </div>
+    `;
+    document.getElementById('savePlayerPoints').onclick = async ()=>{
+      const nextPoints = Number(document.getElementById('playerPointsInput').value);
+      if(Number.isNaN(nextPoints)) return;
+      const delta = nextPoints - Number(player.points ?? 0);
+      await updateDoc(doc(db,'users',playerId), {
+        points: nextPoints,
+        manualBonusPoints: Number(player.manualBonusPoints ?? 0) + delta
+      });
+      if(delta !== 0){
+        await addDoc(collection(db,'points_adjustments'), {
+          playerId,
+          playerNick: player.nick ?? 'Без ника',
+          delta,
+          reason: 'manual_adjust',
+          source: 'moderator_profile',
+          createdBy: me.uid,
+          createdByNick: me.nick ?? 'moderator',
+          createdAt: serverTimestamp()
+        });
+      }
+      await logModeratorAction('change_player_points', { playerId, points: nextPoints });
+      await loadPlayers();
+      await openPlayerProfile(playerId);
+    };
+    document.getElementById('sendModMessage').onclick = async ()=>{
+      const text = (document.getElementById('modMessageText').value || '').trim();
+      if(!text) return;
+      await addDoc(collection(db,'moderator_messages'), {
+        playerId, playerNick: player.nick ?? 'Без ника', text,
+        authorUid: me.uid, authorNick: me.nick ?? 'moderator',
+        createdAt: serverTimestamp()
+      });
+      await logModeratorAction('send_message_to_player', { playerId, textLength: text.length });
+      await openPlayerProfile(playerId);
+    };
+    document.querySelectorAll('[data-open-sub]').forEach(el=>{
+      el.onclick = ()=>{
+        const id = el.dataset.openSub;
+        const target = allSubs.find(x=>x.id===id) ?? approved.find(x=>x.id===id);
+        if(!target) return;
+        alert(`[${target.type}] ${target.status ?? 'pending'}\n${target.text ?? '—'}`);
+      };
+    });
+    modal.classList.add('open');
+  };
+
   const render = ()=>{
     const q = document.getElementById('playerSearch').value.trim().toLowerCase();
     list.innerHTML = '';
-    const filtered = users.filter(u=>`${u.nick ?? ''} ${u.role ?? ''}`.toLowerCase().includes(q));
+    const filtered = users.filter(u=>`${u.nick ?? ''}`.toLowerCase().includes(q));
     if(!filtered.length){ list.innerHTML = '<p>Игроков не найдено.</p>'; return; }
 
-    filtered.forEach(u=>{
+    filtered.forEach((u, idx)=>{
       const row = document.createElement('div');
-      row.className = 'card';
-      row.innerHTML = `
-        <b>${u.nick ?? 'Без ника'}</b>
-        <p class="small">Роль: ${u.role ?? 'player'} · Почта: ${u.email ?? '—'}</p>
-        <label>Очки (что меняет: поле points у игрока)</label>
-        <input class="points" type="number" value="${Number(u.points ?? 0)}">
-        <div class="top-actions"><button class="savePoints">Сохранить очки</button></div>
-      `;
-      row.querySelector('.savePoints').onclick = async ()=>{
-        const points = Number(row.querySelector('.points').value);
-        if(Number.isNaN(points)) return alert('Некорректное число');
-        try {
-          await updateDoc(doc(db,'users',u.id), { points });
-        } catch (e) {
-          alert(getNetworkErrorMessage(e));
-        }
-      };
+      row.className = 'row list-item clickable';
+      row.innerHTML = `<div>${idx+1}</div><div>${u.nick ?? 'Без ника'}</div><div>${Number(u.points ?? 0)}</div>`;
+      row.onclick = ()=> openPlayerProfile(u.id);
       list.appendChild(row);
     });
   };
@@ -251,7 +379,9 @@ async function loadListMenu(){
     filtered.forEach(l=>{
       const row = document.createElement('div');
       row.className = 'row list-item clickable';
-      row.innerHTML = `<div>${Number(l.rank ?? 0) || '—'}</div><div>${l.text ?? 'Без названия'}</div><div>${l.status ?? 'active'}</div>`;
+      const listSize = Math.max(2, levelsCache.length);
+      const levelPts = calcPoints(Number(l.rank ?? 1), listSize, 1);
+      row.innerHTML = `<div>${Number(l.rank ?? 0) || '—'}</div><div>${l.text ?? 'Без названия'}</div><div>${levelPts} очк · ${l.builder ?? '—'} / ${l.verifier ?? '—'}</div>`;
       row.onclick = ()=> openLevelModal(l);
       list.appendChild(row);
     });
@@ -334,6 +464,9 @@ async function applyPendingVerdict(item, verdict){
       await loadListMenu();
       await placeLevel(ref.id, rank);
       payload.finalRank = rank;
+      await logModeratorAction('review_level_submission', { submissionId: item.id, verdict, levelId: ref.id, finalRank: rank });
+    } else {
+      await logModeratorAction('review_level_submission', { submissionId: item.id, verdict });
     }
     await updateDoc(doc(db,'level_submissions',item.id), payload);
   } else {
@@ -356,6 +489,9 @@ async function applyPendingVerdict(item, verdict){
       payload.awardedPoints = earned;
       payload.listQuantity = size;
       payload.scoreK = k;
+      await logModeratorAction('review_completion_submission', { submissionId: item.id, verdict, levelId: level.id, awardedPoints: earned });
+    } else {
+      await logModeratorAction('review_completion_submission', { submissionId: item.id, verdict });
     }
     await updateDoc(doc(db,'completion_submissions',item.id), payload);
   }
@@ -363,6 +499,37 @@ async function applyPendingVerdict(item, verdict){
   await Promise.all([loadListMenu(), loadPendingSubmissions()]);
   renderPendingSubmissions();
 }
+
+document.getElementById('submitAddLevel').onclick = async ()=>{
+  const msg = document.getElementById('addLevelMsg');
+  msg.textContent = '';
+  const text = document.getElementById('addLevelText').value.trim();
+  const link = document.getElementById('addLevelLink').value.trim();
+  const fileUrl = document.getElementById('addLevelFile').value.trim();
+  const builder = document.getElementById('addLevelBuilder').value.trim();
+  const verifier = document.getElementById('addLevelVerifier').value.trim();
+  const rank = Number(document.getElementById('addLevelRank').value || 0);
+
+  if(!text){ msg.textContent = 'Укажи название уровня.'; return; }
+  if(!rank){ msg.textContent = 'Укажи место в листе.'; return; }
+
+  try {
+    const ref = await addDoc(collection(db,'levels'), {
+      text, link, fileUrl, builder: builder || '—', verifier: verifier || '—',
+      rank, status: 'active',
+      addedBy: me.uid,
+      addedByNick: me.nick ?? 'moderator',
+      createdAt: serverTimestamp()
+    });
+    await loadListMenu();
+    await placeLevel(ref.id, rank);
+    await loadListMenu();
+    await logModeratorAction('add_level', { levelId: ref.id, rank, text, link });
+    msg.textContent = 'Уровень добавлен.';
+  } catch (e) {
+    msg.textContent = getNetworkErrorMessage(e);
+  }
+};
 
 onAuthStateChanged(auth, async user => {
   if(!user) return location.href='index.html';

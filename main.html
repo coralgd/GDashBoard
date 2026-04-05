@@ -16,12 +16,12 @@
   <p id="userInfo"></p>
   <p id="userPoints"></p>
   <p id="userPlace"></p>
+  <div id="messagesBox" class="card" style="text-align:left;margin-top:12px;"></div>
 
   <div class="top-actions" style="justify-content:center;">
     <button id="leaderboardBtn" class="btn-hero">Лидерборд</button>
     <button id="openLevelsMenu" class="btn-hero">Меню уровней</button>
-    <button id="openArchive" class="btn-hero">Архив</button>
-    <button id="check" class="btn-hero">Модерация</button>
+    <button id="check" class="btn-hero">Проверить</button>
   </div>
 
   <p id="err" style="color:#ff98b3;margin-top:12px;"></p>
@@ -29,22 +29,27 @@
 
 <script type="module">
 import { auth, db, getNetworkErrorMessage } from './firebase.js';
-import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import { doc, getDoc, collection, getDocs, query, orderBy } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
+import { doc, getDoc, collection, getDocs, query, orderBy, where } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
 const statusEl = document.getElementById('status');
 const info = document.getElementById('userInfo');
 const pointsEl = document.getElementById('userPoints');
 const placeEl = document.getElementById('userPlace');
 const err = document.getElementById('err');
-const archiveBtn = document.getElementById('openArchive');
+const messagesBox = document.getElementById('messagesBox');
 
 onAuthStateChanged(auth, async user => {
   if(!user) return location.href='index.html';
   try {
     const userSnap = await getDoc(doc(db,'users',user.uid));
     const profile = userSnap.exists() ? userSnap.data() : null;
-    if(!profile || profile.situation !== 'verified') return location.href='nick.html';
+    if(!profile || (profile.situation !== 'verified' && profile.situation !== 'freezed')) return location.href='nick.html';
+    if(profile.accountFrozen || profile.situation === 'freezed'){
+      await signOut(auth);
+      err.textContent='Аккаунт заморожен. Вход запрещен.';
+      return;
+    }
 
     info.textContent = `Ник: ${profile.nick ?? '—'}`;
     pointsEl.textContent = `Баллы: ${Number(profile.points ?? 0)}`;
@@ -53,7 +58,7 @@ onAuthStateChanged(auth, async user => {
     let rank = 0, place = '—', last = null, seen = 0;
     usersSnap.forEach(d=>{
       const u = d.data();
-      if(u.situation!=='verified') return;
+      if(u.situation!=='verified' && u.situation!=='freezed') return;
       seen++;
       if(u.points !== last){ rank = seen; last = u.points; }
       if(d.id===user.uid) place = String(rank);
@@ -62,17 +67,22 @@ onAuthStateChanged(auth, async user => {
 
     document.getElementById('leaderboardBtn').onclick = ()=> location.href='leaderboard.html';
     document.getElementById('openLevelsMenu').onclick = ()=> location.href='levels-menu.html';
-    if(profile.role==='elder' || profile.role==='moderator'){
-      archiveBtn.style.display = '';
-      archiveBtn.onclick = ()=> location.href='archive.html';
-    } else {
-      archiveBtn.style.display = 'none';
-    }
     document.getElementById('check').onclick = ()=>{
       if(profile.role==='elder') location.href='elder.html';
       else if(profile.role==='moderator') location.href='moderator.html';
       else err.textContent='Доступно только модераторам';
     };
+
+    try {
+      const msgSnap = await getDocs(query(collection(db,'moderator_messages'), where('playerId','==',user.uid)));
+      const messages = [];
+      msgSnap.forEach(d=>messages.push(d.data()));
+      messages.sort((a,b)=>(b.createdAt?.seconds ?? 0)-(a.createdAt?.seconds ?? 0));
+      messagesBox.innerHTML = `<h3 style="margin-top:0;">Сообщения от модераторов</h3>${messages.map(m=>`<div class="list-item"><b>${m.authorNick ?? 'модератор'}</b><p class="small">${m.text ?? ''}</p></div>`).join('') || '<p class="small">Пока нет сообщений.</p>'}`;
+    } catch {
+      messagesBox.innerHTML = `<h3 style="margin-top:0;">Сообщения от модераторов</h3><p class="small">Сообщения временно недоступны.</p>`;
+    }
+
     statusEl.textContent = '';
   } catch (e) {
     statusEl.textContent = getNetworkErrorMessage(e);

@@ -22,9 +22,9 @@
 
 <script type="module">
 import { auth, db } from './firebase.js';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import { doc, setDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
+import { doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 const emailEl=document.getElementById('email');const passEl=document.getElementById('password');const err=document.getElementById('error');
-document.getElementById('login').onclick=()=>{err.textContent='';signInWithEmailAndPassword(auth,emailEl.value,passEl.value).then(()=>location.href='nick.html').catch(()=>err.textContent='Ошибка входа');};
-document.getElementById('register').onclick=()=>{err.textContent='';createUserWithEmailAndPassword(auth,emailEl.value,passEl.value).then(u=>setDoc(doc(db,'users',u.user.uid),{role:'player',points:0,situation:'not requested'})).then(()=>location.href='nick.html').catch(()=>err.textContent='Ошибка регистрации');};
+document.getElementById('login').onclick=()=>{err.textContent='';signInWithEmailAndPassword(auth,emailEl.value,passEl.value).then(async cred=>{const snap=await getDoc(doc(db,'users',cred.user.uid));const data=snap.exists()?snap.data():{};if(data.accountFrozen||data.situation==='freezed'){await signOut(auth);err.textContent='Аккаунт заморожен. Вход запрещен.';return;}location.href='nick.html';}).catch(()=>err.textContent='Ошибка входа');};
+document.getElementById('register').onclick=()=>{err.textContent='';if(!emailEl.value.trim()||!passEl.value.trim()){err.textContent='сначала введи данные';return;}createUserWithEmailAndPassword(auth,emailEl.value,passEl.value).then(u=>setDoc(doc(db,'users',u.user.uid),{role:'player',points:0,situation:'not requested',manualBonusPoints:0,accountFrozen:false})).then(()=>location.href='nick.html').catch(()=>err.textContent='Ошибка регистрации');};
 </script></body></html>
