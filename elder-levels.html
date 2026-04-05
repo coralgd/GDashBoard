@@ -29,7 +29,6 @@
       <div class="top-actions" style="flex-direction:column;">
         <button id="openSettings">Параметры очков</button>
         <button id="openSubmissions">Все отправки</button>
-        <button id="recalc" class="btn-success">Пересчитать очки</button>
       </div>
     </aside>
   </div>
@@ -200,16 +199,6 @@ async function recalcCompletions(){
     await updateDoc(doc(db,'users',playerId), { points: Math.round(sum * 100) / 100 });
   }
 }
-
-document.getElementById('recalc').onclick = async ()=>{
-  const btn = document.getElementById('recalc');
-  btn.disabled = true;
-  btn.textContent = 'Пересчет...';
-  await recalcCompletions();
-  await renderLevels();
-  btn.disabled = false;
-  btn.textContent = 'Пересчитать очки';
-};
 
 document.getElementById('saveSettings').onclick = async ()=>{
   const maximumPoints = Number(document.getElementById('maximumPoints').value);
