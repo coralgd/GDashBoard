@@ -160,7 +160,11 @@ function renderMessageComposer(targetUser){
     const text = document.getElementById('msgText').value.trim();
     if(!text){ document.getElementById('msgStatus').textContent = 'Введите текст.'; return; }
     try{
-      await addDoc(collection(db,'messages'), { fromUid: me.id, fromNick: me.nick ?? 'Игрок', toUid: targetUser.id, toNick: targetUser.nick ?? 'Игрок', text, createdAt: serverTimestamp(), readAt: null });
+      try {
+        await addDoc(collection(db,'messages'), { fromUid: me.id, fromNick: me.nick ?? 'Игрок', toUid: targetUser.id, toNick: targetUser.nick ?? 'Игрок', text, createdAt: serverTimestamp(), readAt: null });
+      } catch {
+        await addDoc(collection(db,'moderator_messages'), { fromUid: me.id, fromNick: me.nick ?? 'Игрок', toUid: targetUser.id, toNick: targetUser.nick ?? 'Игрок', text, createdAt: serverTimestamp(), readAt: null });
+      }
       document.getElementById('msgStatus').textContent = 'Сообщение отправлено.';
       document.getElementById('msgText').value = '';
     } catch {
@@ -226,10 +230,17 @@ function renderLevelRatingForm(level){
       const difficulty = document.getElementById('rateDifficulty').value;
       const coolness = document.getElementById('rateCoolness').value;
       const note = document.getElementById('rateNote').value.trim();
-      await setDoc(doc(db,'level_ratings', `${level.id}_${me.id}`), {
-        levelId: level.id, levelText: level.text ?? '', userId: me.id, userNick: me.nick ?? 'Без ника',
-        difficulty, coolness, note, updatedAt: serverTimestamp()
-      }, { merge:true });
+      try {
+        await setDoc(doc(db,'level_ratings', `${level.id}_${me.id}`), {
+          levelId: level.id, levelText: level.text ?? '', userId: me.id, userNick: me.nick ?? 'Без ника',
+          difficulty, coolness, note, updatedAt: serverTimestamp()
+        }, { merge:true });
+      } catch {
+        await addDoc(collection(db,'level_ratings'), {
+          levelId: level.id, levelText: level.text ?? '', userId: me.id, userNick: me.nick ?? 'Без ника',
+          difficulty, coolness, note, updatedAt: serverTimestamp()
+        });
+      }
       document.getElementById('rateStatus').textContent = 'Оценка сохранена.';
       const snap = await getDocs(query(collection(db,'level_ratings'), where('levelId','==',level.id)));
       const rows = []; snap.forEach(d=>rows.push({ id:d.id, ...d.data() }));
@@ -311,7 +322,9 @@ onAuthStateChanged(auth, async user => {
     try{ allCompSnap = await getDocs(collection(db,'completion_submissions')); } catch { allCompSnap = { forEach: ()=>{} }; }
     try{ approvedSnap = await getDocs(query(collection(db,'completion_submissions'), where('status','==','approved'))); } catch { approvedSnap = { forEach: ()=>{} }; }
     try{ scoreSnap = await getDoc(doc(db,'settings','scoring')); } catch { scoreSnap = { exists: ()=>false }; }
-    try{ ratingsSnap = await getDocs(collection(db,'level_ratings')); } catch { ratingsSnap = { forEach: ()=>{} }; }
+    try{ ratingsSnap = await getDocs(collection(db,'level_ratings')); } catch {
+      try{ ratingsSnap = await getDocs(query(collection(db,'level_ratings'), where('levelId','!=',''))); } catch { ratingsSnap = { forEach: ()=>{} }; }
+    }
 
     const sv = scoreSnap.exists() ? scoreSnap.data() : {};
     scoring = { alphaA: Number(sv.alphaA ?? 4) };
