@@ -133,7 +133,7 @@ const toggleViewBtn = document.getElementById('toggleView');
 let me = null;
 let currentPanel = 'players';
 let levelsCache = [];
-let scoring = { maximumPoints:100, rankDecayFactor:3, repeatPenaltyPower:0.5 };
+let scoring = { alphaA:4 };
 let pendingSubmissions = [];
 let usersCache = [];
 const siteModal = document.getElementById('siteModal');
@@ -205,11 +205,20 @@ document.getElementById('closePlayerModal').onclick = ()=> playerModal.classList
 document.getElementById('closeSubmissions').onclick = ()=> submissionsModal.classList.remove('open');
 document.getElementById('closeAddLevel').onclick = ()=> addLevelModal.classList.remove('open');
 
-function calcPoints(rank, size, k=1){
+function completionTerm(rank, size){
   const n = Math.max(2, Number(size || 2));
   const r = Math.max(1, Math.min(Number(rank || 1), n));
   const x = (r - 1) / (n - 1);
-  return Math.round((scoring.maximumPoints * Math.exp(-scoring.rankDecayFactor * x) / Math.pow(Math.max(1,k), scoring.repeatPenaltyPower))*100)/100;
+  return Math.exp(-Number(scoring.alphaA ?? 4) * x);
+}
+function totalScoreByRanks(ranks, size){
+  const sum = ranks.reduce((a,rank)=>a + completionTerm(rank, size), 0);
+  return Math.round((190 * (1 - Math.exp(-sum))) * 100) / 100;
+}
+function calcPoints(rank, size, existingRanks=[]){
+  const before = totalScoreByRanks(existingRanks, size);
+  const after = totalScoreByRanks([...existingRanks, Number(rank || 1)], size);
+  return Math.round((after - before) * 100) / 100;
 }
 
 function formatDate(ts){
@@ -233,11 +242,7 @@ async function logModeratorAction(action, details = {}){
 async function loadScoring(){
   const scoreSnap = await getDoc(doc(db,'settings','scoring'));
   const s = scoreSnap.exists() ? scoreSnap.data() : {};
-  scoring = {
-    maximumPoints: Number(s.maximumPoints ?? s.maxPoints ?? 100),
-    rankDecayFactor: Number(s.rankDecayFactor ?? s.decayA ?? 3),
-    repeatPenaltyPower: Number(s.repeatPenaltyPower ?? s.grindPower ?? 0.5)
-  };
+  scoring = { alphaA: Number(s.alphaA ?? 4) };
 }
 
 async function placeLevel(levelId, targetRank){
@@ -307,6 +312,10 @@ async function loadPlayers(){
     <div class="page-header"><h2 style="margin:0">Список игроков</h2></div>
     <label>Поиск по нику/роли</label>
     <input id="playerSearch" placeholder="Например: player, ivan">
+    <div class="top-actions">
+      <div><label>Роль</label><select id="playerRoleFilter"><option value="all">Все</option><option value="player">Игроки</option><option value="moderator">Модераторы</option><option value="elder">Старшие модераторы</option></select></div>
+      <div><label>Статус</label><select id="playerStatusFilter"><option value="all">Все</option><option value="verified">verified</option><option value="frozen">frozen</option></select></div>
+    </div>
     <div class="row small"><div>#</div><div>Ник</div><div>Очки</div></div>
     <div id="playerList"></div>
   `;
@@ -315,7 +324,13 @@ async function loadPlayers(){
   const render = ()=>{
     const q = document.getElementById('playerSearch').value.trim().toLowerCase();
     list.innerHTML = '';
-    const filtered = usersCache.filter(u=>`${u.nick ?? ''} ${u.role ?? ''}`.toLowerCase().includes(q));
+    const role = document.getElementById('playerRoleFilter').value;
+    const st = document.getElementById('playerStatusFilter').value;
+    const filtered = usersCache.filter(u=>{
+      if(role!=='all' && (u.role ?? 'player')!==role) return false;
+      if(st!=='all' && (u.situation ?? '')!==st) return false;
+      return `${u.nick ?? ''} ${u.role ?? ''}`.toLowerCase().includes(q);
+    });
     if(!filtered.length){ list.innerHTML = '<p>Игроков не найдено.</p>'; return; }
 
     let rank = 0;
@@ -332,6 +347,8 @@ async function loadPlayers(){
   };
 
   document.getElementById('playerSearch').oninput = render;
+  document.getElementById('playerRoleFilter').onchange = render;
+  document.getElementById('playerStatusFilter').onchange = render;
   render();
 }
 
@@ -348,6 +365,10 @@ async function loadListMenu(){
     <div class="page-header"><h2 style="margin:0">Меню листа</h2></div>
     <label>Поиск по уровню</label>
     <input id="levelSearch" placeholder="Название, ранг, ссылка">
+    <div class="top-actions">
+      <div><label>Диапазон ранга</label><select id="levelRankFilter"><option value="all">Все</option><option value="1-10">1-10</option><option value="11-30">11-30</option><option value="31+">31+</option></select></div>
+      <div><label>С верифером</label><select id="levelVerifierFilter"><option value="all">Все</option><option value="with">Есть</option><option value="without">Нет</option></select></div>
+    </div>
     <div id="levelList"></div>
   `;
 
@@ -355,19 +376,32 @@ async function loadListMenu(){
   const render = ()=>{
     const q = document.getElementById('levelSearch').value.trim().toLowerCase();
     list.innerHTML = '';
-    const filtered = levelsCache.filter(l=>`${l.text ?? ''} ${l.rank ?? ''} ${l.link ?? ''}`.toLowerCase().includes(q));
+    const rankFilter = document.getElementById('levelRankFilter').value;
+    const verifierFilter = document.getElementById('levelVerifierFilter').value;
+    const filtered = levelsCache.filter(l=>{
+      const rank = Number(l.rank ?? 0);
+      if(rankFilter==='1-10' && !(rank>=1 && rank<=10)) return false;
+      if(rankFilter==='11-30' && !(rank>=11 && rank<=30)) return false;
+      if(rankFilter==='31+' && !(rank>=31)) return false;
+      const verifier = String(l.verifier ?? '').trim();
+      if(verifierFilter==='with' && !verifier) return false;
+      if(verifierFilter==='without' && verifier) return false;
+      return `${l.text ?? ''} ${l.rank ?? ''} ${l.link ?? ''}`.toLowerCase().includes(q);
+    });
     if(!filtered.length){ list.innerHTML='<p>Уровней не найдено.</p>'; return; }
 
     filtered.forEach(l=>{
       const row = document.createElement('div');
       row.className = 'row list-item clickable';
-      row.innerHTML = `<div>${Number(l.rank ?? 0) || '—'}</div><div>${l.text ?? 'Без названия'}</div><div>${calcPoints(Number(l.rank ?? 1), Math.max(2, levelsCache.length), 1)} · ${l.builder ?? '—'} / ${l.verifier ?? '—'}</div>`;
+      row.innerHTML = `<div>${Number(l.rank ?? 0) || '—'}</div><div>${l.text ?? 'Без названия'}</div><div>${calcPoints(Number(l.rank ?? 1), Math.max(2, levelsCache.length), [])} · ${l.builder ?? '—'} / ${l.verifier ?? '—'}</div>`;
       row.onclick = ()=> openLevelModal(l);
       list.appendChild(row);
     });
   };
 
   document.getElementById('levelSearch').oninput = render;
+  document.getElementById('levelRankFilter').onchange = render;
+  document.getElementById('levelVerifierFilter').onchange = render;
   render();
 }
 
@@ -517,9 +551,10 @@ async function applyPendingVerdict(item, verdict){
       const level = levelsCache.find(l=>l.id===levelId);
       if(!level) return showModalMessage('Выбери уровень');
       const approvedSnap = await getDocs(query(collection(db,'completion_submissions'), where('playerId','==',item.playerId), where('status','==','approved')));
-      const k = approvedSnap.size + 1;
+      const existingRanks = [];
+      approvedSnap.forEach(d=>existingRanks.push(Number(d.data().listRank ?? 1)));
       const size = Math.max(2, levelsCache.length);
-      const earned = calcPoints(Number(level.rank ?? 1), size, k);
+      const earned = calcPoints(Number(level.rank ?? 1), size, existingRanks);
       const userRef = doc(db,'users',item.playerId);
       const userSnap = await getDoc(userRef);
       const userData = userSnap.exists() ? userSnap.data() : { points:0 };
@@ -529,7 +564,7 @@ async function applyPendingVerdict(item, verdict){
       payload.levelText = level.text ?? 'Уровень';
       payload.awardedPoints = earned;
       payload.listQuantity = size;
-      payload.scoreK = k;
+      payload.scoreK = existingRanks.length + 1;
       await logModeratorAction('review_completion_submission', { submissionId: item.id, verdict, levelId: level.id, awardedPoints: earned });
     } else {
       await logModeratorAction('review_completion_submission', { submissionId: item.id, verdict });

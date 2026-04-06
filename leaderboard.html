@@ -10,6 +10,7 @@
   #modal .dialog{width:min(1100px,96vw);max-height:95vh;min-height:70vh}
   .modal-table{width:100%;border-collapse:collapse;margin-top:8px}
   .modal-table th,.modal-table td{border:1px solid #3f8fcc55;padding:8px;text-align:left;vertical-align:top}
+  .rating-badge{display:inline-block;padding:2px 8px;border:1px solid #3f8fcc88;border-radius:999px;margin-right:8px;font-size:12px}
 </style>
 </head>
 <body>
@@ -47,7 +48,13 @@
 <script type="module">
 import { auth, db, getNetworkErrorMessage } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import { addDoc, collection, getDocs, orderBy, query, where, doc, getDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+import { addDoc, collection, getDocs, orderBy, query, where, doc, getDoc, serverTimestamp, setDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+
+const DIFFICULTY_OPTIONS = [
+  'auto 1','easy 2','normal 3','hard 4','harder 5','harder 6','harder 7','insane 8','insane 9',
+  'easy demon','medium demon','hard demon','insane demon','extreme demon'
+];
+const COOLNESS_OPTIONS = ['star rate', 'feature', 'epic', 'legendary', 'mythic'];
 
 const statusEl = document.getElementById('status');
 const playersList = document.getElementById('playersList');
@@ -61,15 +68,16 @@ const modalBody = document.getElementById('modalBody');
 let allCompletions = [];
 let approvedCompletions = [];
 let levelsById = new Map();
-let scoring = { maximumPoints:100, rankDecayFactor:3, repeatPenaltyPower:0.5 };
+let scoring = { alphaA:4 };
 let me = null;
+let levelRatingsByLevelId = new Map();
 
-
-function calcPoints(rank, size, k=1){
+function calcPoints(rank, size){
   const n = Math.max(2, Number(size || 2));
   const r = Math.max(1, Math.min(Number(rank || 1), n));
   const x = (r - 1) / (n - 1);
-  return Math.round((scoring.maximumPoints * Math.exp(-scoring.rankDecayFactor * x) / Math.pow(Math.max(1,k), scoring.repeatPenaltyPower))*100)/100;
+  const term = Math.exp(-Number(scoring.alphaA ?? 4) * x);
+  return Math.round((190 * (1 - Math.exp(-term))) * 100) / 100;
 }
 
 function setView(name){
@@ -92,21 +100,38 @@ function formatModeration(x){
   return `status=${x.status ?? '—'} · note=${x.note ?? '—'} · reviewedBy=${who} · reviewedAt=${when}`;
 }
 
+function safe(v){ return String(v ?? '').replace(/[&<>"']/g, (s)=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[s])); }
+
+function levelRatingStats(levelId){
+  const rows = levelRatingsByLevelId.get(levelId) ?? [];
+  if(!rows.length) return { count:0, avgDifficulty:'—', avgCoolness:'—', my:null };
+  const my = rows.find(x=>x.userId===me?.id) ?? null;
+
+
+  const avgRoundedByIndex = (options, field)=>{
+    const nums = rows.map(x=>options.indexOf(x[field])).filter(i=>i>=0);
+    if(!nums.length) return '—';
+    const avg = nums.reduce((a,b)=>a+b,0) / nums.length;
+    const idx = Math.max(0, Math.min(options.length-1, Math.round(avg)));
+    return options[idx];
+  };
+
+  return {
+    count: rows.length,
+    avgDifficulty: avgRoundedByIndex(DIFFICULTY_OPTIONS, 'difficulty'),
+    avgCoolness: avgRoundedByIndex(COOLNESS_OPTIONS, 'coolness'),
+    my
+  };
+}
+
 function openPlayerLevelHistory(user, levelId, levelRank){
-  const records = allCompletions
-    .filter(x => x.playerId === user.id)
-    .filter(x => {
-      if(levelId && x.levelId) return x.levelId === levelId;
-      return Number(x.listRank ?? -1) === Number(levelRank ?? -2);
-    })
-    .sort((a,b)=>(a.createdAt?.seconds ?? 0) - (b.createdAt?.seconds ?? 0));
+  const records = allCompletions.filter(x => x.playerId === user.id).filter(x => {
+    if(levelId && x.levelId) return x.levelId === levelId;
+    return Number(x.listRank ?? -1) === Number(levelRank ?? -2);
+  }).sort((a,b)=>(a.createdAt?.seconds ?? 0) - (b.createdAt?.seconds ?? 0));
 
   const levelName = levelId ? (levelsById.get(levelId)?.text ?? 'Уровень') : `Уровень #${levelRank ?? '—'}`;
-
-  if(!records.length){
-    openModal(`История по уровню: ${levelName}`, '<p>Отправок по этому уровню не найдено.</p>');
-    return;
-  }
+  if(!records.length){ openModal(`История по уровню: ${levelName}`, '<p>Отправок по этому уровню не найдено.</p>'); return; }
 
   let html = `<p><b>Игрок:</b> ${user.nick ?? 'Без ника'}</p><p><b>Уровень:</b> ${levelName}</p>`;
   html += '<table class="modal-table"><thead><tr><th>#</th><th>Что отправил</th><th>Модерация</th></tr></thead><tbody>';
@@ -118,11 +143,34 @@ function openPlayerLevelHistory(user, levelId, levelRank){
   openModal(`История по уровню: ${levelName}`, html);
 }
 
-function openPlayerCompletions(user){
-  const mineApproved = approvedCompletions
-    .filter(x=>x.playerId===user.id)
-    .sort((a,b)=>Number(a.listRank ?? 9999) - Number(b.listRank ?? 9999));
+function renderMessageComposer(targetUser){
+  modalBody.innerHTML = `
+    <div class="card">
+      <h3 style="margin-top:0;">Сообщение для ${safe(targetUser.nick ?? 'игрока')}</h3>
+      <textarea id="msgText" placeholder="Текст сообщения"></textarea>
+      <div class="top-actions">
+        <button id="sendMsgBtn" class="btn-success">Отправить</button>
+        <button id="backMsgBtn" class="btn-ghost">Назад</button>
+      </div>
+      <p id="msgStatus" class="small"></p>
+    </div>
+  `;
+  document.getElementById('backMsgBtn').onclick = ()=> openPlayerCompletions(targetUser);
+  document.getElementById('sendMsgBtn').onclick = async ()=>{
+    const text = document.getElementById('msgText').value.trim();
+    if(!text){ document.getElementById('msgStatus').textContent = 'Введите текст.'; return; }
+    try{
+      await addDoc(collection(db,'messages'), { fromUid: me.id, fromNick: me.nick ?? 'Игрок', toUid: targetUser.id, toNick: targetUser.nick ?? 'Игрок', text, createdAt: serverTimestamp(), readAt: null });
+      document.getElementById('msgStatus').textContent = 'Сообщение отправлено.';
+      document.getElementById('msgText').value = '';
+    } catch {
+      document.getElementById('msgStatus').textContent = 'Не удалось отправить сообщение.';
+    }
+  };
+}
 
+function openPlayerCompletions(user){
+  const mineApproved = approvedCompletions.filter(x=>x.playerId===user.id).sort((a,b)=>Number(a.listRank ?? 9999) - Number(b.listRank ?? 9999));
   let html = `
     <p><b>Ник:</b> ${user.nick ?? 'Без ника'}</p>
     <p><b>Почта:</b> ${user.email ?? '—'}</p>
@@ -132,44 +180,86 @@ function openPlayerCompletions(user){
     <p><b>Место в топе:</b> ${user.rank}</p>
     <p><b>Подтвержденных прохождений:</b> ${mineApproved.length}</p>
   `;
+  if(me?.id && me.id!==user.id){ html += `<div class="top-actions"><button id="openMsgComposer" class="btn-success">Написать сообщение</button></div>`; }
 
-  if(!mineApproved.length){
-    html += '<p>Подтвержденных прохождений нет.</p>';
+  if(!mineApproved.length){ html += '<p>Подтвержденных прохождений нет.</p>'; openModal(`Игрок: ${user.nick ?? 'Без ника'}`, html); }
+  else {
+    html += '<table class="modal-table"><thead><tr><th>#Сложн.</th><th>Уровень</th><th>Очки</th><th>Действие</th></tr></thead><tbody>';
+    mineApproved.forEach(c=>{
+      const level = c.levelId ? levelsById.get(c.levelId) : null;
+      const levelName = level?.text ?? c.text ?? 'Уровень';
+      const lvlRank = Number(c.listRank ?? level?.rank ?? 9999);
+      html += `<tr><td>${lvlRank}</td><td>${levelName}</td><td>${Number(c.awardedPoints ?? 0)}</td><td><button class="openHistory" data-level-id="${c.levelId ?? ''}" data-level-rank="${lvlRank}">Все отправки по уровню</button></td></tr>`;
+    });
+    html += '</tbody></table>';
     openModal(`Игрок: ${user.nick ?? 'Без ника'}`, html);
-    return;
+    modalBody.querySelectorAll('.openHistory').forEach(btn=>{
+      btn.onclick = ()=> openPlayerLevelHistory(user, btn.dataset.levelId || '', Number(btn.dataset.levelRank || 0));
+    });
   }
 
-  if(me?.id && me.id!==user.id){
-    html += `<div class="card"><h3 style="margin-top:0;">Сообщение игроку</h3><textarea id="msgText" placeholder="Текст сообщения"></textarea><div class="top-actions"><button id="sendMsgBtn">Отправить</button></div><p id="msgStatus" class="small"></p></div>`;
-  }
-  html += '<table class="modal-table"><thead><tr><th>#Сложн.</th><th>Уровень</th><th>Очки</th><th>Действие</th></tr></thead><tbody>';
-  mineApproved.forEach(c=>{
-    const level = c.levelId ? levelsById.get(c.levelId) : null;
-    const levelName = level?.text ?? c.text ?? 'Уровень';
-    const lvlRank = Number(c.listRank ?? level?.rank ?? 9999);
-    html += `<tr><td>${lvlRank}</td><td>${levelName}</td><td>${Number(c.awardedPoints ?? 0)}</td><td><button class="openHistory" data-level-id="${c.levelId ?? ''}" data-level-rank="${lvlRank}">Все отправки по уровню</button></td></tr>`;
-  });
-  html += '</tbody></table>';
+  const openComposerBtn = document.getElementById('openMsgComposer');
+  if(openComposerBtn) openComposerBtn.onclick = ()=> renderMessageComposer(user);
+}
 
-  openModal(`Игрок: ${user.nick ?? 'Без ника'}`, html);
+function renderLevelRatingForm(level){
+  const stat = levelRatingStats(level.id);
+  modalBody.innerHTML = `
+    <div class="card">
+      <h3 style="margin-top:0;">Оценка: ${safe(level.text ?? 'Уровень')}</h3>
+      <label>Сложность (RobTop)</label>
+      <select id="rateDifficulty">${DIFFICULTY_OPTIONS.map(x=>`<option value="${safe(x)}" ${stat.my?.difficulty===x?'selected':''}>${safe(x)}</option>`).join('')}</select>
+      <label>Крутость (RobTop)</label>
+      <select id="rateCoolness">${COOLNESS_OPTIONS.map(x=>`<option value="${safe(x)}" ${stat.my?.coolness===x?'selected':''}>${safe(x)}</option>`).join('')}</select>
+      <label>Комментарий (опционально)</label>
+      <textarea id="rateNote" placeholder="Почему такая оценка?">${safe(stat.my?.note ?? '')}</textarea>
+      <div class="top-actions">
+        <button id="saveRate" class="btn-success">Отправить</button>
+        <button id="cancelRate" class="btn-ghost">Назад</button>
+      </div>
+      <p id="rateStatus" class="small"></p>
+    </div>
+  `;
+  document.getElementById('cancelRate').onclick = ()=> openLevelDetails(level);
+  document.getElementById('saveRate').onclick = async ()=>{
+    try{
+      const difficulty = document.getElementById('rateDifficulty').value;
+      const coolness = document.getElementById('rateCoolness').value;
+      const note = document.getElementById('rateNote').value.trim();
+      await setDoc(doc(db,'level_ratings', `${level.id}_${me.id}`), {
+        levelId: level.id, levelText: level.text ?? '', userId: me.id, userNick: me.nick ?? 'Без ника',
+        difficulty, coolness, note, updatedAt: serverTimestamp()
+      }, { merge:true });
+      document.getElementById('rateStatus').textContent = 'Оценка сохранена.';
+      const snap = await getDocs(query(collection(db,'level_ratings'), where('levelId','==',level.id)));
+      const rows = []; snap.forEach(d=>rows.push({ id:d.id, ...d.data() }));
+      levelRatingsByLevelId.set(level.id, rows);
+      renderLevels(Array.from(levelsById.values()).sort((a,b)=>Number(a.rank ?? 9999)-Number(b.rank ?? 9999)));
+    } catch {
+      document.getElementById('rateStatus').textContent = 'Не удалось сохранить оценку.';
+    }
+  };
+}
 
-  modalBody.querySelectorAll('.openHistory').forEach(btn=>{
-    btn.onclick = ()=> openPlayerLevelHistory(user, btn.dataset.levelId || '', Number(btn.dataset.levelRank || 0));
-  });
-  const sendBtn = document.getElementById('sendMsgBtn');
-  if(sendBtn){
-    sendBtn.onclick = async ()=>{
-      const text = document.getElementById('msgText').value.trim();
-      if(!text){ document.getElementById('msgStatus').textContent = 'Введите текст.'; return; }
-      try{
-        await addDoc(collection(db,'messages'), { fromUid: me.id, fromNick: me.nick ?? 'Игрок', toUid: user.id, toNick: user.nick ?? 'Игрок', text, createdAt: serverTimestamp(), readAt: null });
-        document.getElementById('msgStatus').textContent = 'Сообщение отправлено.';
-        document.getElementById('msgText').value = '';
-      } catch {
-        document.getElementById('msgStatus').textContent = 'Не удалось отправить сообщение.';
-      }
-    };
+function openLevelDetails(l){
+  const passed = approvedCompletions.filter(c => (c.levelId && l.id) ? c.levelId === l.id : Number(c.listRank ?? -1) === Number(l.rank ?? -2));
+  const builderText = (l.builder ?? l.creator ?? l.maker ?? '—');
+  const verifierText = (l.verifier ?? l.verifiedBy ?? l.checker ?? '—');
+  const stat = levelRatingStats(l.id);
+  let html = `<p><b>Базовые очки уровня:</b> ${calcPoints(Number(l.rank ?? 1), Math.max(2, levelsById.size))}</p>
+    <p><b>Строитель:</b> ${builderText} · <b>Верифер:</b> ${verifierText}</p>
+    <p><span class="rating-badge">Сложность: ${stat.avgDifficulty}</span><span class="rating-badge">Крутость: ${stat.avgCoolness}</span><span class="small">Оценок: ${stat.count}</span></p>
+    <div class="top-actions"><button id="openRateLevel" class="btn-success">Оценить</button></div>`;
+
+  if(!passed.length) html += '<p>Этот уровень пока никто не прошел.</p>';
+  else {
+    html += '<table class="modal-table"><thead><tr><th>#</th><th>Игрок</th><th>Очки</th></tr></thead><tbody>';
+    passed.forEach((c, idx)=>{ html += `<tr><td>${idx+1}</td><td>${c.nick ?? 'Без ника'}</td><td>${Number(c.awardedPoints ?? 0)}</td></tr>`; });
+    html += '</tbody></table>';
   }
+
+  openModal(`Уровень #${l.rank ?? '—'}`, html);
+  document.getElementById('openRateLevel').onclick = ()=> renderLevelRatingForm(l);
 }
 
 document.getElementById('showPlayers').onclick = ()=> setView('players');
@@ -179,11 +269,7 @@ document.getElementById('closeModal').onclick = ()=> modal.classList.remove('ope
 
 function renderPlayers(users){
   playersList.innerHTML = '';
-  if(!users.length){
-    playersList.innerHTML = '<p>Нет верифицированных игроков.</p>';
-    return;
-  }
-
+  if(!users.length){ playersList.innerHTML = '<p>Нет верифицированных игроков.</p>'; return; }
   users.forEach(u => {
     const row = document.createElement('div');
     row.className = 'row list-item clickable';
@@ -197,74 +283,43 @@ function renderPlayers(users){
 
 function renderLevels(levels){
   levelsList.innerHTML = '';
-  if(!levels.length){
-    levelsList.innerHTML = '<p>Лист уровней пуст.</p>';
-    return;
-  }
-
+  if(!levels.length){ levelsList.innerHTML = '<p>Лист уровней пуст.</p>'; return; }
   levels.forEach(l => {
     const row = document.createElement('div');
     row.className = 'row list-item clickable';
-    const basePoints = calcPoints(Number(l.rank ?? 1), levels.length, 1);
+    const basePoints = calcPoints(Number(l.rank ?? 1), levels.length);
     const builder = (l.builder ?? l.creator ?? l.maker ?? '—');
     const verifier = (l.verifier ?? l.verifiedBy ?? l.checker ?? '—');
-    row.innerHTML = `<div>${Number(l.rank ?? 0) || '—'}</div><div><b>${l.text ?? 'Без названия'}</b><div class="small">Строитель: ${builder} · Верифер: ${verifier}</div></div><div>${basePoints}</div>`;
-
-    row.onclick = (e)=>{
-      if(e.target.tagName === 'A') return;
-      const passed = approvedCompletions.filter(c => {
-        if(c.levelId && l.id) return c.levelId === l.id;
-        return Number(c.listRank ?? -1) === Number(l.rank ?? -2);
-      });
-
-      if(!passed.length){
-        openModal(`Уровень #${l.rank ?? '—'}`, '<p>Этот уровень пока никто не прошел.</p>');
-        return;
-      }
-
-      const builderText = (l.builder ?? l.creator ?? l.maker ?? '—');
-      const verifierText = (l.verifier ?? l.verifiedBy ?? l.checker ?? '—');
-      let html = `<p><b>Базовые очки уровня:</b> ${calcPoints(Number(l.rank ?? 1), levels.length, 1)}</p><p><b>Строитель:</b> ${builderText} · <b>Верифер:</b> ${verifierText}</p>`;
-      html += '<table class="modal-table"><thead><tr><th>#</th><th>Игрок</th><th>Очки</th></tr></thead><tbody>';
-      passed.forEach((c, idx)=>{
-        html += `<tr><td>${idx+1}</td><td>${c.nick ?? 'Без ника'}</td><td>${Number(c.awardedPoints ?? 0)}</td></tr>`;
-      });
-      html += '</tbody></table>';
-      openModal(`Уровень #${l.rank ?? '—'}`, html);
-    };
-
+    const stat = levelRatingStats(l.id);
+    row.innerHTML = `<div>${Number(l.rank ?? 0) || '—'}</div><div><b>${l.text ?? 'Без названия'}</b><div class="small">Строитель: ${builder} · Верифер: ${verifier}</div><div class="small">Сложность: ${stat.avgDifficulty} · Крутость: ${stat.avgCoolness} · Оценок: ${stat.count}</div></div><div>${basePoints}</div>`;
+    row.onclick = ()=> openLevelDetails(l);
     levelsList.appendChild(row);
   });
 }
 
 onAuthStateChanged(auth, async user => {
   if(!user) return location.href='index.html';
-
   try {
     const meSnap = await getDoc(doc(db,'users',user.uid));
     const myProfile = meSnap.exists() ? meSnap.data() : null;
     if(!myProfile) return location.href='nick.html';
 
     me = { id:user.uid, nick:myProfile.nick ?? '' };
-    let usersSnap, levelsSnap, allCompSnap, approvedSnap, scoreSnap;
+    let usersSnap, levelsSnap, allCompSnap, approvedSnap, scoreSnap, ratingsSnap;
     try{ usersSnap = await getDocs(query(collection(db,'users'), orderBy('points','desc'))); } catch { usersSnap = { forEach: ()=>{} }; }
     try{ levelsSnap = await getDocs(query(collection(db,'levels'), orderBy('rank','asc'))); } catch { levelsSnap = { forEach: ()=>{} }; }
     try{ allCompSnap = await getDocs(collection(db,'completion_submissions')); } catch { allCompSnap = { forEach: ()=>{} }; }
     try{ approvedSnap = await getDocs(query(collection(db,'completion_submissions'), where('status','==','approved'))); } catch { approvedSnap = { forEach: ()=>{} }; }
     try{ scoreSnap = await getDoc(doc(db,'settings','scoring')); } catch { scoreSnap = { exists: ()=>false }; }
+    try{ ratingsSnap = await getDocs(collection(db,'level_ratings')); } catch { ratingsSnap = { forEach: ()=>{} }; }
 
     const sv = scoreSnap.exists() ? scoreSnap.data() : {};
-    scoring = {
-      maximumPoints: Number(sv.maximumPoints ?? sv.maxPoints ?? 100),
-      rankDecayFactor: Number(sv.rankDecayFactor ?? sv.decayA ?? 3),
-      repeatPenaltyPower: Number(sv.repeatPenaltyPower ?? sv.grindPower ?? 0.5)
-    };
+    scoring = { alphaA: Number(sv.alphaA ?? 4) };
 
     const users = [];
     let seen = 0;
     let rank = 0;
     let lastPoints = null;
-
     usersSnap.forEach(d => {
       const u = d.data();
       if(u.situation !== 'verified' && u.situation !== 'frozen') return;
@@ -284,9 +339,16 @@ onAuthStateChanged(auth, async user => {
       levelsById.set(d.id, item);
     });
 
+    levelRatingsByLevelId = new Map();
+    ratingsSnap.forEach(d=>{
+      const r = { id:d.id, ...d.data() };
+      if(!r.levelId) return;
+      if(!levelRatingsByLevelId.has(r.levelId)) levelRatingsByLevelId.set(r.levelId, []);
+      levelRatingsByLevelId.get(r.levelId).push(r);
+    });
+
     allCompletions = [];
     allCompSnap.forEach(d=>allCompletions.push({ id:d.id, ...d.data() }));
-
     approvedCompletions = [];
     approvedSnap.forEach(d=>approvedCompletions.push({ id:d.id, ...d.data() }));
 
@@ -297,7 +359,7 @@ onAuthStateChanged(auth, async user => {
     statusEl.textContent = '';
     setView('players');
   } catch (e) {
-    statusEl.textContent = 'Лидерборд временно недоступен. Попробуйте позже.';
+    statusEl.textContent = getNetworkErrorMessage(e);
   }
 });
 </script>
