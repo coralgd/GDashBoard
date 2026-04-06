@@ -307,6 +307,10 @@ async function loadPlayers(){
     <div class="page-header"><h2 style="margin:0">Список игроков</h2></div>
     <label>Поиск по нику/роли</label>
     <input id="playerSearch" placeholder="Например: player, ivan">
+    <div class="top-actions">
+      <div><label>Роль</label><select id="playerRoleFilter"><option value="all">Все</option><option value="player">Игроки</option><option value="moderator">Модераторы</option><option value="elder">Старшие модераторы</option></select></div>
+      <div><label>Статус</label><select id="playerStatusFilter"><option value="all">Все</option><option value="verified">verified</option><option value="frozen">frozen</option></select></div>
+    </div>
     <div class="row small"><div>#</div><div>Ник</div><div>Очки</div></div>
     <div id="playerList"></div>
   `;
@@ -315,7 +319,13 @@ async function loadPlayers(){
   const render = ()=>{
     const q = document.getElementById('playerSearch').value.trim().toLowerCase();
     list.innerHTML = '';
-    const filtered = usersCache.filter(u=>`${u.nick ?? ''} ${u.role ?? ''}`.toLowerCase().includes(q));
+    const role = document.getElementById('playerRoleFilter').value;
+    const st = document.getElementById('playerStatusFilter').value;
+    const filtered = usersCache.filter(u=>{
+      if(role!=='all' && (u.role ?? 'player')!==role) return false;
+      if(st!=='all' && (u.situation ?? '')!==st) return false;
+      return `${u.nick ?? ''} ${u.role ?? ''}`.toLowerCase().includes(q);
+    });
     if(!filtered.length){ list.innerHTML = '<p>Игроков не найдено.</p>'; return; }
 
     let rank = 0;
@@ -332,6 +342,8 @@ async function loadPlayers(){
   };
 
   document.getElementById('playerSearch').oninput = render;
+  document.getElementById('playerRoleFilter').onchange = render;
+  document.getElementById('playerStatusFilter').onchange = render;
   render();
 }
 
@@ -348,6 +360,10 @@ async function loadListMenu(){
     <div class="page-header"><h2 style="margin:0">Меню листа</h2></div>
     <label>Поиск по уровню</label>
     <input id="levelSearch" placeholder="Название, ранг, ссылка">
+    <div class="top-actions">
+      <div><label>Диапазон ранга</label><select id="levelRankFilter"><option value="all">Все</option><option value="1-10">1-10</option><option value="11-30">11-30</option><option value="31+">31+</option></select></div>
+      <div><label>С верифером</label><select id="levelVerifierFilter"><option value="all">Все</option><option value="with">Есть</option><option value="without">Нет</option></select></div>
+    </div>
     <div id="levelList"></div>
   `;
 
@@ -355,7 +371,18 @@ async function loadListMenu(){
   const render = ()=>{
     const q = document.getElementById('levelSearch').value.trim().toLowerCase();
     list.innerHTML = '';
-    const filtered = levelsCache.filter(l=>`${l.text ?? ''} ${l.rank ?? ''} ${l.link ?? ''}`.toLowerCase().includes(q));
+    const rankFilter = document.getElementById('levelRankFilter').value;
+    const verifierFilter = document.getElementById('levelVerifierFilter').value;
+    const filtered = levelsCache.filter(l=>{
+      const rank = Number(l.rank ?? 0);
+      if(rankFilter==='1-10' && !(rank>=1 && rank<=10)) return false;
+      if(rankFilter==='11-30' && !(rank>=11 && rank<=30)) return false;
+      if(rankFilter==='31+' && !(rank>=31)) return false;
+      const verifier = String(l.verifier ?? '').trim();
+      if(verifierFilter==='with' && !verifier) return false;
+      if(verifierFilter==='without' && verifier) return false;
+      return `${l.text ?? ''} ${l.rank ?? ''} ${l.link ?? ''}`.toLowerCase().includes(q);
+    });
     if(!filtered.length){ list.innerHTML='<p>Уровней не найдено.</p>'; return; }
 
     filtered.forEach(l=>{
@@ -368,6 +395,8 @@ async function loadListMenu(){
   };
 
   document.getElementById('levelSearch').oninput = render;
+  document.getElementById('levelRankFilter').onchange = render;
+  document.getElementById('levelVerifierFilter').onchange = render;
   render();
 }
 
