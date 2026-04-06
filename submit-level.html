@@ -24,6 +24,11 @@
     <input id="builder" placeholder="Строитель уровня"><br><br>
     <input id="verifier" placeholder="Верифер уровня"><br><br>
     <input id="fileUrl" placeholder="Ссылка на файл (опционально)"><br><br>
+    <label>Твое мнение о сложности (RobTop)</label>
+    <select id="opinionDifficulty"><option value="">Не указывать</option><option>auto 1</option><option>easy 2</option><option>normal 3</option><option>hard 4</option><option>harder 5</option><option>harder 6</option><option>harder 7</option><option>insane 8</option><option>insane 9</option><option>easy demon</option><option>medium demon</option><option>hard demon</option><option>insane demon</option><option>extreme demon</option></select><br><br>
+    <label>Твое мнение о крутости (RobTop)</label>
+    <select id="opinionCoolness"><option value="">Не указывать</option><option>star rate</option><option>feature</option><option>epic</option><option>legendary</option><option>mythic</option></select><br><br>
+    <textarea id="opinionNote" placeholder="Комментарий к твоей оценке (опционально)" style="min-height:80px"></textarea><br><br>
 
     <label class="small">Сослаться на прошлую отправку (опц.)</label>
     <select id="ref"><option value="">Без ссылки</option></select><br><br>
@@ -81,12 +86,15 @@ document.getElementById('send').onclick=async()=>{
   const verifier=document.getElementById('verifier').value.trim();
   const fileUrl=document.getElementById('fileUrl').value.trim();
   const referenceSubmissionId=document.getElementById('ref').value||'';
+  const opinionDifficulty=document.getElementById('opinionDifficulty').value||'';
+  const opinionCoolness=document.getElementById('opinionCoolness').value||'';
+  const opinionNote=document.getElementById('opinionNote').value.trim();
   const msg=document.getElementById('msg');
   if(!link||!text||!builder||!verifier){ msg.textContent='Нужны ссылка, текст, строитель и верифер'; return; }
 
   try{
     await addDoc(collection(db,'level_submissions'),{
-      authorId:user.uid,nick:profile.nick ?? 'Без ника',link,text,builder,verifier,fileUrl,referenceSubmissionId,
+      authorId:user.uid,nick:profile.nick ?? 'Без ника',link,text,builder,verifier,fileUrl,referenceSubmissionId,opinionDifficulty,opinionCoolness,opinionNote,
       relatedLevelId:selectedLevel?.id ?? '', relatedLevelRank:Number(selectedLevel?.rank ?? 0) || null,
       status:'pending',note:'',createdAt:serverTimestamp()
     });
