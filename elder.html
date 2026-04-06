@@ -17,6 +17,8 @@
   .submission-layout{display:grid;grid-template-columns:minmax(260px,38%) minmax(0,1fr);gap:12px}
   .submission-list .list-item{cursor:pointer}
   .submission-list .list-item.active{outline:2px solid #00aaff}
+  .danger-backdrop{background:rgba(0,0,0,.92)!important;animation:pulseDanger 2.4s ease-in-out infinite}
+  @keyframes pulseDanger{0%{background:rgba(0,0,0,.92)}50%{background:rgba(110,0,0,.95)}100%{background:rgba(0,0,0,.92)}}
   @media (max-width: 980px){
     .layout{grid-template-columns:1fr}
     .side-tools{position:static}
@@ -139,6 +141,18 @@
   </div>
 </div>
 
+<div id="siteModal" class="dialog-backdrop">
+  <div class="dialog" style="max-width:560px;">
+    <h3 id="siteModalTitle">Сообщение</h3>
+    <p id="siteModalText"></p>
+    <p id="siteModalHint" class="small"></p>
+    <div class="top-actions">
+      <button id="siteModalCancel" class="btn-ghost">Отмена</button>
+      <button id="siteModalOk">Ок</button>
+    </div>
+  </div>
+</div>
+
 <script type="module">
 import { auth, db, getNetworkErrorMessage } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
@@ -164,6 +178,51 @@ let players = [];
 let levels = [];
 let submissions = [];
 let selectedSubmissionId = '';
+const siteModal = document.getElementById('siteModal');
+
+function closeSiteModal(){ siteModal.classList.remove('open'); siteModal.classList.remove('danger-backdrop'); }
+function showModalMessage(text, title='Сообщение'){
+  document.getElementById('siteModalTitle').textContent = title;
+  document.getElementById('siteModalText').textContent = text;
+  document.getElementById('siteModalHint').textContent = '';
+  const cancel = document.getElementById('siteModalCancel');
+  const ok = document.getElementById('siteModalOk');
+  cancel.style.display = 'none';
+  ok.disabled = false;
+  ok.textContent = 'Понятно';
+  ok.onclick = ()=> closeSiteModal();
+  siteModal.classList.add('open');
+}
+function askDanger(text, title='Подтверждение'){
+  return new Promise(resolve=>{
+    document.getElementById('siteModalTitle').textContent = title;
+    document.getElementById('siteModalText').textContent = text;
+    const hint = document.getElementById('siteModalHint');
+    const cancel = document.getElementById('siteModalCancel');
+    const ok = document.getElementById('siteModalOk');
+    let left = 3;
+    hint.textContent = `Подтверждение будет доступно через ${left} сек.`;
+    ok.textContent = `Подождите ${left}`;
+    ok.disabled = true;
+    cancel.style.display = '';
+    siteModal.classList.add('open');
+    siteModal.classList.add('danger-backdrop');
+    const timer = setInterval(()=>{
+      left -= 1;
+      if(left<=0){
+        clearInterval(timer);
+        hint.textContent = 'Можно подтвердить действие.';
+        ok.textContent = 'Подтвердить';
+        ok.disabled = false;
+      } else {
+        hint.textContent = `Подтверждение будет доступно через ${left} сек.`;
+        ok.textContent = `Подождите ${left}`;
+      }
+    },1000);
+    cancel.onclick = ()=>{ clearInterval(timer); closeSiteModal(); resolve(false); };
+    ok.onclick = ()=>{ if(ok.disabled)return; clearInterval(timer); closeSiteModal(); resolve(true); };
+  });
+}
 
 function calcPoints(rank, size, k=1){
   const n = Math.max(2, Number(size || 2));
@@ -239,15 +298,24 @@ async function recalcAllPoints(){
   size = Math.max(2, size);
 
   const compSnap = await getDocs(query(collection(db,'completion_submissions'), where('status','==','approved')));
+  const awardsSnap = await getDocs(collection(db,'point_awards'));
   const byUser = new Map();
+  const bonusByUser = new Map();
   compSnap.forEach(d=>{
     const c = { id:d.id, ...d.data() };
     if(!c.playerId) return;
     if(!byUser.has(c.playerId)) byUser.set(c.playerId, []);
     byUser.get(c.playerId).push(c);
   });
+  awardsSnap.forEach(d=>{
+    const a = d.data();
+    if(!a.playerId) return;
+    bonusByUser.set(a.playerId, Number(bonusByUser.get(a.playerId) ?? 0) + Number(a.amount ?? 0));
+  });
 
-  for(const [uid, arr] of byUser){
+  const allUsers = new Set([...byUser.keys(), ...bonusByUser.keys()]);
+  for(const uid of allUsers){
+    const arr = byUser.get(uid) ?? [];
     arr.sort((a,b)=>(a.reviewedAt?.seconds ?? 0) - (b.reviewedAt?.seconds ?? 0));
     let sum = 0;
     for(let i=0;i<arr.length;i++){
@@ -261,7 +329,8 @@ async function recalcAllPoints(){
         scoreK: i+1
       });
     }
-    await updateDoc(doc(db,'users',uid), { points: Math.round(sum * 100) / 100 });
+    const total = Math.round((sum + Number(bonusByUser.get(uid) ?? 0))*100)/100;
+    await updateDoc(doc(db,'users',uid), { points: total });
   }
 }
 
@@ -316,10 +385,12 @@ function renderMainList(){
     const row = document.createElement('div');
     row.className = 'row list-item clickable';
     if(showPlayers){
+      if(item.role==='moderator') row.classList.add('moderator');
+      if(item.role==='elder') row.classList.add('elder');
       row.innerHTML = `<div>${item.rank}</div><div>${item.nick ?? 'Без ника'}</div><div>${Number(item.points ?? 0)}</div>`;
       row.onclick = ()=> openPlayerModal(item.id);
     } else {
-      row.innerHTML = `<div>${Number(item.rank ?? 0) || '—'}</div><div>${item.text ?? 'Без названия'}</div><div>${item.builder ?? '—'} / ${item.verifier ?? '—'}</div>`;
+      row.innerHTML = `<div>${Number(item.rank ?? 0) || '—'}</div><div>${item.text ?? 'Без названия'}</div><div>${calcPoints(Number(item.rank ?? 1), Math.max(2, levels.filter(x=>x.status!=='archived').length), 1)} · ${item.builder ?? '—'} / ${item.verifier ?? '—'}</div>`;
       row.onclick = ()=> openLevelModal(item.id);
     }
     listContainer.appendChild(row);
@@ -363,8 +434,12 @@ async function openPlayerModal(playerId){
       <div class="top-actions">
         <button id="savePlayer">Сохранить профиль</button>
         <button id="toggleVerify" class="${verNegative ? 'danger' : ''}">${verNegative ? 'Снять верификацию' : 'Верифицировать'}</button>
+        <button id="toggleFreeze" class="${player.accountFrozen ? '' : 'danger'}">${player.accountFrozen ? 'Разморозить аккаунт' : 'Заморозить аккаунт'}</button>
         <button id="deletePlayer" class="danger">Удалить аккаунт</button>
       </div>
+      <label>Сообщение игроку</label>
+      <textarea id="modMessageText" placeholder="Текст сообщения"></textarea>
+      <div class="top-actions"><button id="sendModMessage">Отправить сообщение</button></div>
     </div>
 
     <div class="card">
@@ -373,16 +448,11 @@ async function openPlayerModal(playerId){
         <thead><tr><th>Дата</th><th>Уровень</th><th>Очки</th><th>Действие</th></tr></thead>
         <tbody>
           ${approved.map(c=>{
-            const options = levels
-              .filter(l=>l.status!=='archived')
-              .sort((a,b)=>Number(a.rank??9999)-Number(b.rank??9999))
-              .map(l=>`<option value="${l.id}" ${c.levelId===l.id?'selected':''}>#${Number(l.rank ?? 0) || '—'} · ${String(l.text ?? 'Без названия')}</option>`)
-              .join('');
             return `<tr>
               <td>${fmtDate(c.reviewedAt)}</td>
-              <td><select data-comp-id="${c.id}" class="compLevel">${options}</select></td>
+              <td>${c.levelText ?? levels.find(l=>l.id===c.levelId)?.text ?? 'Уровень'}</td>
               <td>${Number(c.awardedPoints ?? 0)}</td>
-              <td><button data-comp-save="${c.id}">Изменить уровень</button></td>
+              <td><button data-comp-delete="${c.id}" class="danger">Удалить прохождение</button></td>
             </tr>`;
           }).join('') || '<tr><td colspan="4">Нет подтвержденных прохождений.</td></tr>'}
         </tbody>
@@ -403,9 +473,21 @@ async function openPlayerModal(playerId){
     await updateDoc(doc(db,'users',playerId), {
       nick: nextNick,
       email: nextEmail,
-      points: nextPoints,
       role: nextRole
     });
+    const delta = Math.round((nextPoints - Number(player.points ?? 0))*100)/100;
+    if(delta !== 0){
+      await addDoc(collection(db,'point_awards'), {
+        playerId,
+        playerNick: nextNick,
+        amount: delta,
+        reason: 'Ручная корректировка очков старшим модератором',
+        grantedBy: me.uid,
+        grantedByNick: me.nick ?? 'elder',
+        createdAt: serverTimestamp()
+      });
+    }
+    await recalcAllPoints();
     await logModeratorAction('update_player_profile', { playerId, nick: nextNick, points: nextPoints, role: nextRole, email: nextEmail });
     await loadData();
     renderMainList();
@@ -420,9 +502,25 @@ async function openPlayerModal(playerId){
     renderMainList();
     await openPlayerModal(playerId);
   };
+  document.getElementById('toggleFreeze').onclick = async ()=>{
+    const next = !Boolean(player.accountFrozen);
+    const reason = next ? 'Заморожено старшим модератором' : '';
+    await updateDoc(doc(db,'users',playerId), { accountFrozen: next, frozenReason: reason, frozenAt: next ? serverTimestamp() : null, frozenBy: next ? me.uid : null });
+    await logModeratorAction('toggle_player_freeze', { playerId, accountFrozen: next, reason });
+    await loadData();
+    renderMainList();
+    await openPlayerModal(playerId);
+  };
+  document.getElementById('sendModMessage').onclick = async ()=>{
+    const text = document.getElementById('modMessageText').value.trim();
+    if(!text) return showModalMessage('Введите текст сообщения');
+    await addDoc(collection(db,'moderator_messages'), { toUid: playerId, toNick: player.nick ?? 'Без ника', fromUid: me.uid, fromNick: me.nick ?? 'elder', fromRole: 'elder', text, createdAt: serverTimestamp(), readAt: null });
+    await logModeratorAction('send_message_to_player', { toUid: playerId, toNick: player.nick ?? 'Без ника' });
+    document.getElementById('modMessageText').value = '';
+  };
 
   document.getElementById('deletePlayer').onclick = async ()=>{
-    if(!confirm('Удалить профиль пользователя? Это действие необратимо.')) return;
+    if(!await askDanger('Удалить профиль пользователя? Это действие необратимо.')) return;
     await deleteDoc(doc(db,'users',playerId));
     await logModeratorAction('delete_player', { playerId, nick: player.nick ?? 'Без ника' });
     playerModal.classList.remove('open');
@@ -430,19 +528,12 @@ async function openPlayerModal(playerId){
     renderMainList();
   };
 
-  document.querySelectorAll('[data-comp-save]').forEach(btn=>{
+  document.querySelectorAll('[data-comp-delete]').forEach(btn=>{
     btn.onclick = async ()=>{
-      const compId = btn.dataset.compSave;
-      const select = document.querySelector(`select[data-comp-id="${compId}"]`);
-      const levelId = select?.value;
-      const level = levels.find(l=>l.id===levelId);
-      if(!level) return;
-      await updateDoc(doc(db,'completion_submissions',compId), {
-        levelId,
-        listRank: Number(level.rank ?? 1),
-        levelText: level.text ?? 'Уровень'
-      });
-      await logModeratorAction('change_completion_level', { completionSubmissionId: compId, levelId, levelRank: Number(level.rank ?? 1) });
+      const compId = btn.dataset.compDelete;
+      if(!await askDanger('Удалить подтверждённое прохождение игрока?')) return;
+      await updateDoc(doc(db,'completion_submissions',compId), { status:'removed', note:'Удалено старшим модератором', removedBy: me.uid, removedAt: serverTimestamp() });
+      await logModeratorAction('delete_completion_from_player', { completionSubmissionId: compId, playerId });
       await recalcAllPoints();
       await loadData();
       renderMainList();
@@ -495,7 +586,7 @@ async function openLevelModal(levelId){
   };
 
   document.getElementById('deleteLevel').onclick = async ()=>{
-    if(!confirm('Удалить уровень из листа?')) return;
+    if(!await askDanger('Удалить уровень из листа?')) return;
     await deleteDoc(doc(db,'levels',levelId));
     await logModeratorAction('delete_level', { levelId, rank: Number(level.rank ?? 0) || null, text: level.text ?? '' });
     await recalcAllPoints();
@@ -554,7 +645,7 @@ async function applySubmissionVerdict(item, verdict){
     const payload = { status: verdict, note, reviewedBy: me.uid, reviewedAt: serverTimestamp() };
     if(verdict==='approved'){
       const rank = Number(document.getElementById('subRank')?.value || 0);
-      if(!rank){ alert('Укажи место в листе'); return; }
+      if(!rank){ showModalMessage('Укажи место в листе'); return; }
 
       const existing = levels.find(l=>l.sourceSubmissionId===item.id);
       let levelId = existing?.id;
@@ -602,7 +693,7 @@ async function applySubmissionVerdict(item, verdict){
 
     const payload = { status: verdict, note, reviewedBy: me.uid, reviewedAt: serverTimestamp() };
     if(verdict==='approved'){
-      if(!level){ alert('Выбери уровень'); return; }
+      if(!level){ showModalMessage('Выбери уровень'); return; }
       payload.levelId = level.id;
       payload.listRank = Number(level.rank ?? 1);
       payload.levelText = level.text ?? 'Уровень';
@@ -666,6 +757,7 @@ onAuthStateChanged(auth, async user=>{
     const meSnap = await getDoc(doc(db,'users',user.uid));
     const profile = meSnap.exists() ? meSnap.data() : null;
     if(!profile || profile.situation!=='verified') return location.href='nick.html';
+    if(profile.accountFrozen) return location.href='index.html';
     if(profile.role!=='elder') return location.href='main.html';
 
     me = { uid:user.uid, nick:profile.nick ?? 'elder' };

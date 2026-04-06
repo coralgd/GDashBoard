@@ -47,7 +47,7 @@
 <script type="module">
 import { auth, db, getNetworkErrorMessage } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-import { collection, getDocs, orderBy, query, where, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+import { addDoc, collection, getDocs, orderBy, query, where, doc, getDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
 const statusEl = document.getElementById('status');
 const playersList = document.getElementById('playersList');
@@ -62,6 +62,7 @@ let allCompletions = [];
 let approvedCompletions = [];
 let levelsById = new Map();
 let scoring = { maximumPoints:100, rankDecayFactor:3, repeatPenaltyPower:0.5 };
+let me = null;
 
 
 function calcPoints(rank, size, k=1){
@@ -138,6 +139,9 @@ function openPlayerCompletions(user){
     return;
   }
 
+  if(me?.id && me.id!==user.id){
+    html += `<div class="card"><h3 style="margin-top:0;">Сообщение игроку</h3><textarea id="msgText" placeholder="Текст сообщения"></textarea><div class="top-actions"><button id="sendMsgBtn">Отправить</button></div><p id="msgStatus" class="small"></p></div>`;
+  }
   html += '<table class="modal-table"><thead><tr><th>#Сложн.</th><th>Уровень</th><th>Очки</th><th>Действие</th></tr></thead><tbody>';
   mineApproved.forEach(c=>{
     const level = c.levelId ? levelsById.get(c.levelId) : null;
@@ -152,6 +156,20 @@ function openPlayerCompletions(user){
   modalBody.querySelectorAll('.openHistory').forEach(btn=>{
     btn.onclick = ()=> openPlayerLevelHistory(user, btn.dataset.levelId || '', Number(btn.dataset.levelRank || 0));
   });
+  const sendBtn = document.getElementById('sendMsgBtn');
+  if(sendBtn){
+    sendBtn.onclick = async ()=>{
+      const text = document.getElementById('msgText').value.trim();
+      if(!text){ document.getElementById('msgStatus').textContent = 'Введите текст.'; return; }
+      try{
+        await addDoc(collection(db,'messages'), { fromUid: me.id, fromNick: me.nick ?? 'Игрок', toUid: user.id, toNick: user.nick ?? 'Игрок', text, createdAt: serverTimestamp(), readAt: null });
+        document.getElementById('msgStatus').textContent = 'Сообщение отправлено.';
+        document.getElementById('msgText').value = '';
+      } catch {
+        document.getElementById('msgStatus').textContent = 'Не удалось отправить сообщение.';
+      }
+    };
+  }
 }
 
 document.getElementById('showPlayers').onclick = ()=> setView('players');
@@ -224,16 +242,16 @@ onAuthStateChanged(auth, async user => {
 
   try {
     const meSnap = await getDoc(doc(db,'users',user.uid));
-    const me = meSnap.exists() ? meSnap.data() : null;
-    if(!me) return location.href='nick.html';
+    const myProfile = meSnap.exists() ? meSnap.data() : null;
+    if(!myProfile) return location.href='nick.html';
 
-    const [usersSnap, levelsSnap, allCompSnap, approvedSnap, scoreSnap] = await Promise.all([
-      getDocs(query(collection(db,'users'), orderBy('points','desc'))),
-      getDocs(query(collection(db,'levels'), orderBy('rank','asc'))),
-      getDocs(collection(db,'completion_submissions')),
-      getDocs(query(collection(db,'completion_submissions'), where('status','==','approved'))),
-      getDoc(doc(db,'settings','scoring'))
-    ]);
+    me = { id:user.uid, nick:myProfile.nick ?? '' };
+    let usersSnap, levelsSnap, allCompSnap, approvedSnap, scoreSnap;
+    try{ usersSnap = await getDocs(query(collection(db,'users'), orderBy('points','desc'))); } catch { usersSnap = { forEach: ()=>{} }; }
+    try{ levelsSnap = await getDocs(query(collection(db,'levels'), orderBy('rank','asc'))); } catch { levelsSnap = { forEach: ()=>{} }; }
+    try{ allCompSnap = await getDocs(collection(db,'completion_submissions')); } catch { allCompSnap = { forEach: ()=>{} }; }
+    try{ approvedSnap = await getDocs(query(collection(db,'completion_submissions'), where('status','==','approved'))); } catch { approvedSnap = { forEach: ()=>{} }; }
+    try{ scoreSnap = await getDoc(doc(db,'settings','scoring')); } catch { scoreSnap = { exists: ()=>false }; }
 
     const sv = scoreSnap.exists() ? scoreSnap.data() : {};
     scoring = {
@@ -272,6 +290,7 @@ onAuthStateChanged(auth, async user => {
     approvedCompletions = [];
     approvedSnap.forEach(d=>approvedCompletions.push({ id:d.id, ...d.data() }));
 
+    me.nick = me.nick || (users.find(x=>x.id===user.uid)?.nick ?? '');
     renderPlayers(users);
     renderLevels(levels);
 
