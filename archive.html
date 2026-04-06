@@ -62,10 +62,13 @@ function renderArchive(){
   if(!filtered.length){ box.innerHTML = '<p>Ничего не найдено.</p>'; return; }
 
   const keys = Array.from(grouped.keys()).sort((a,b)=>a.localeCompare(b,'ru'));
-  box.innerHTML = keys.map(k=>{
+  const folderCard = `<div class="card"><h3 style="margin-top:0">📁 Журнал действий модеров</h3><p class="small">Отдельная папка с действиями модераторов и старших модераторов.</p><button id="openModeratorLogFolder" class="btn-ghost">Открыть журнал</button></div>`;
+  box.innerHTML = folderCard + keys.map(k=>{
     const rows = grouped.get(k).sort((a,b)=>(b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
     return `<div class="card"><h3 style="margin-top:0">${k} <span class="pill">${rows.length}</span></h3>${rows.map((x,i)=>`<div class="list-item"><b>#${i+1} · ${x.type} · ${x.status}</b><p>${x.text || '—'}</p><p class="small">игрок=${x.playerName} · уровень=${x.levelName}</p><p class="small">link=${x.link || '—'} · file=${x.fileUrl || '—'} · note=${x.note || '—'} · дата=${fmt(x.createdAt)}</p></div>`).join('')}</div>`;
   }).join('');
+  const folderBtn = document.getElementById('openModeratorLogFolder');
+  if(folderBtn) folderBtn.onclick = async ()=>{ await loadModeratorLog(); document.getElementById('moderatorLogModal').classList.add('open'); };
 }
 
 async function loadData(){
@@ -77,6 +80,7 @@ async function loadData(){
   ]);
   let awardsSnap = null; try { awardsSnap = await getDocs(collection(db,'point_awards')); } catch {}
   let messagesSnap = null; try { messagesSnap = await getDocs(collection(db,'messages')); } catch {}
+  let moderatorMessagesSnap = null; try { moderatorMessagesSnap = await getDocs(collection(db,'moderator_messages')); } catch {}
 
   const levelById = new Map(); const levelByRank = new Map();
   levelsSnap.forEach(d=>{ const l=d.data(); levelById.set(d.id, norm(l.text,`Уровень ${d.id}`)); if(l.rank!=null) levelByRank.set(Number(l.rank), norm(l.text,`Уровень #${l.rank}`)); });
@@ -86,9 +90,32 @@ async function loadData(){
   cs.forEach(d=>{ const x=d.data(); if(!x.status || x.status==='pending') return; rows.push({ type:'completion', status:x.status, text:x.text??'', note:x.note??'', link:x.link??'', fileUrl:x.fileUrl??'', playerName:norm(x.nick,'Без ника'), levelName:x.levelId?(levelById.get(x.levelId) ?? `Уровень ${x.levelId}`):(x.listRank!=null?(levelByRank.get(Number(x.listRank)) ?? `Уровень #${x.listRank}`):'Без уровня'), createdAt:x.createdAt ?? x.reviewedAt ?? null }); });
   ap.forEach(d=>{ const x=d.data(); if(!x.status || x.status==='pending') return; rows.push({ type:'appeal', status:x.status, text:x.text??'', note:x.note??'', link:x.link??'', fileUrl:x.fileUrl??'', playerName:norm(x.nick,'Без ника'), levelName:x.levelId?(levelById.get(x.levelId) ?? `Уровень ${x.levelId}`):(x.listRank!=null?(levelByRank.get(Number(x.listRank)) ?? `Уровень #${x.listRank}`):'Без уровня'), createdAt:x.createdAt ?? x.reviewedAt ?? null }); });
   if(awardsSnap) awardsSnap.forEach(d=>{ const x=d.data(); rows.push({ type:'award', status:'done', text:`${Number(x.amount ?? 0)} очков`, note:x.reason ?? '', link:'', fileUrl:'', playerName:norm(x.playerNick,'Без ника'), levelName:'Начисления', createdAt:x.createdAt ?? null }); });
-  if(messagesSnap) messagesSnap.forEach(d=>{ const x=d.data(); rows.push({ type:'message', status:x.readAt?'read':'unread', text:x.text ?? '', note:`от ${norm(x.fromNick,'—')}`, link:'', fileUrl:'', playerName:norm(x.toNick,'Без ника'), levelName:'Сообщения', createdAt:x.createdAt ?? null }); });
+  if(messagesSnap) messagesSnap.forEach(d=>{ const x=d.data(); rows.push({ type:'message', status:x.readAt?'read':'unread', text:x.text ?? '', note:`от ${norm(x.fromNick,'—')} → ${norm(x.toNick,'—')}`, link:'', fileUrl:'', playerName:norm(x.toNick,'Без ника'), levelName:'Сообщения', createdAt:x.createdAt ?? null }); });
+  if(moderatorMessagesSnap) moderatorMessagesSnap.forEach(d=>{ const x=d.data(); rows.push({ type:'message', status:x.readAt?'read':'unread', text:x.text ?? '', note:`[mod] ${norm(x.fromNick,'—')} → ${norm(x.toNick,'—')}`, link:'', fileUrl:'', playerName:norm(x.toNick,'Без ника'), levelName:'Сообщения', createdAt:x.createdAt ?? null }); });
 
   dataState.rows = rows;
+}
+
+function renderModeratorLogRows(rows){
+  const list = document.getElementById('moderatorLogList');
+  if(!rows.length){ list.innerHTML = '<p>Журнал пока пуст.</p>'; return; }
+  rows.sort((a,b)=>(b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
+  list.innerHTML = rows.slice(0,200).map((x, i)=>`<div class="card"><b>#${i+1} · ${x.action ?? 'action'}</b><p class="small">${fmt(x.createdAt)} · ${x.actorNick ?? '—'} (${x.actorRole ?? 'moderator'})</p><pre class="small" style="white-space:pre-wrap;margin:0;">${JSON.stringify(x.details ?? {}, null, 2)}</pre></div>`).join('');
+}
+
+async function buildModeratorLogFallback(){
+  const [levelSnap, compSnap, appealSnap, awardsSnap] = await Promise.all([
+    getDocs(collection(db,'level_submissions')),
+    getDocs(collection(db,'completion_submissions')),
+    getDocs(collection(db,'appeals')),
+    getDocs(collection(db,'point_awards'))
+  ]);
+  const rows = [];
+  levelSnap.forEach(d=>{ const x=d.data(); if(!x.reviewedBy || !x.reviewedAt || !x.status || x.status==='pending') return; rows.push({ action:'review_level_submission', actorNick:x.reviewedByNick ?? x.reviewedBy ?? '—', actorRole:'moderator', createdAt:x.reviewedAt, details:{ submissionId:d.id, verdict:x.status, finalRank:x.finalRank ?? null, note:x.note ?? '' } }); });
+  compSnap.forEach(d=>{ const x=d.data(); if(!x.reviewedBy || !x.reviewedAt || !x.status || x.status==='pending') return; rows.push({ action:'review_completion_submission', actorNick:x.reviewedByNick ?? x.reviewedBy ?? '—', actorRole:'moderator', createdAt:x.reviewedAt, details:{ submissionId:d.id, verdict:x.status, levelId:x.levelId ?? null, note:x.note ?? '' } }); });
+  appealSnap.forEach(d=>{ const x=d.data(); if(!x.reviewedBy || !x.reviewedAt || !x.status || x.status==='pending') return; rows.push({ action:'review_appeal', actorNick:x.reviewedByNick ?? x.reviewedBy ?? '—', actorRole:'moderator', createdAt:x.reviewedAt, details:{ appealId:d.id, verdict:x.status, note:x.note ?? '' } }); });
+  awardsSnap.forEach(d=>{ const x=d.data(); if(!x.grantedBy || !x.createdAt) return; rows.push({ action:'manual_points_award', actorNick:x.grantedByNick ?? x.grantedBy ?? '—', actorRole:'moderator', createdAt:x.createdAt, details:{ playerNick:x.playerNick ?? '—', amount:Number(x.amount ?? 0), reason:x.reason ?? '' } }); });
+  return rows;
 }
 
 async function loadModeratorLog(){
@@ -96,11 +123,18 @@ async function loadModeratorLog(){
   list.innerHTML = '<p>Загрузка журнала…</p>';
   try {
     const snap = await getDocs(query(collection(db,'moderator_actions'), orderBy('createdAt','desc'), limit(200)));
-    if(snap.empty){ list.innerHTML = '<p>Журнал пока пуст.</p>'; return; }
-    let html = '';
-    snap.forEach((d, i)=>{ const x=d.data(); html += `<div class="card"><b>#${i+1} · ${x.action ?? 'action'}</b><p class="small">${fmt(x.createdAt)} · ${x.actorNick ?? '—'} (${x.actorRole ?? 'moderator'})</p><pre class="small" style="white-space:pre-wrap;margin:0;">${JSON.stringify(x.details ?? {}, null, 2)}</pre></div>`; });
-    list.innerHTML = html;
-  } catch (e) { list.innerHTML = `<p>${getNetworkErrorMessage(e)}</p>`; }
+    const rows = [];
+    snap.forEach(d=>rows.push(d.data()));
+    renderModeratorLogRows(rows);
+  } catch (e) {
+    try {
+      const rows = await buildModeratorLogFallback();
+      renderModeratorLogRows(rows);
+      list.insertAdjacentHTML('afterbegin', `<p class="small">Основной журнал недоступен (${getNetworkErrorMessage(e)}). Показана восстановленная версия по данным заявок.</p>`);
+    } catch (fallbackError) {
+      list.innerHTML = `<p>${getNetworkErrorMessage(fallbackError)}</p>`;
+    }
+  }
 }
 
 onAuthStateChanged(auth, async user=>{

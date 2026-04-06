@@ -71,6 +71,7 @@ let levelsById = new Map();
 let scoring = { alphaA:4 };
 let me = null;
 let levelRatingsByLevelId = new Map();
+let levelSubmissionById = new Map();
 
 function calcPoints(rank, size){
   const n = Math.max(2, Number(size || 2));
@@ -184,7 +185,7 @@ function openPlayerCompletions(user){
     <p><b>Место в топе:</b> ${user.rank}</p>
     <p><b>Подтвержденных прохождений:</b> ${mineApproved.length}</p>
   `;
-  if(me?.id && me.id!==user.id){ html += `<div class="top-actions"><button id="openMsgComposer" class="btn-success">Написать сообщение</button></div>`; }
+  if(me?.id && me.id!==user.id){ html += `<div class="top-actions"><button id="openMsgComposer" class="btn-success">Перейти к отправке сообщения</button></div>`; }
 
   if(!mineApproved.length){ html += '<p>Подтвержденных прохождений нет.</p>'; openModal(`Игрок: ${user.nick ?? 'Без ника'}`, html); }
   else {
@@ -257,8 +258,11 @@ function openLevelDetails(l){
   const builderText = (l.builder ?? l.creator ?? l.maker ?? '—');
   const verifierText = (l.verifier ?? l.verifiedBy ?? l.checker ?? '—');
   const stat = levelRatingStats(l.id);
+  const sourceSubmission = l.sourceSubmissionId ? levelSubmissionById.get(l.sourceSubmissionId) : null;
+  const sourceNick = sourceSubmission?.nick ?? sourceSubmission?.authorNick ?? sourceSubmission?.authorName ?? '—';
   let html = `<p><b>Базовые очки уровня:</b> ${calcPoints(Number(l.rank ?? 1), Math.max(2, levelsById.size))}</p>
     <p><b>Строитель:</b> ${builderText} · <b>Верифер:</b> ${verifierText}</p>
+    <p><b>Отправил уровень:</b> ${sourceNick}</p>
     <p><span class="rating-badge">Сложность: ${stat.avgDifficulty}</span><span class="rating-badge">Крутость: ${stat.avgCoolness}</span><span class="small">Оценок: ${stat.count}</span></p>
     <div class="top-actions"><button id="openRateLevel" class="btn-success">Оценить</button></div>`;
 
@@ -301,8 +305,7 @@ function renderLevels(levels){
     const basePoints = calcPoints(Number(l.rank ?? 1), levels.length);
     const builder = (l.builder ?? l.creator ?? l.maker ?? '—');
     const verifier = (l.verifier ?? l.verifiedBy ?? l.checker ?? '—');
-    const stat = levelRatingStats(l.id);
-    row.innerHTML = `<div>${Number(l.rank ?? 0) || '—'}</div><div><b>${l.text ?? 'Без названия'}</b><div class="small">Строитель: ${builder} · Верифер: ${verifier}</div><div class="small">Сложность: ${stat.avgDifficulty} · Крутость: ${stat.avgCoolness} · Оценок: ${stat.count}</div></div><div>${basePoints}</div>`;
+    row.innerHTML = `<div>${Number(l.rank ?? 0) || '—'}</div><div><b>${l.text ?? 'Без названия'}</b><div class="small">Строитель: ${builder} · Верифер: ${verifier}</div></div><div>${basePoints}</div>`;
     row.onclick = ()=> openLevelDetails(l);
     levelsList.appendChild(row);
   });
@@ -316,7 +319,7 @@ onAuthStateChanged(auth, async user => {
     if(!myProfile) return location.href='nick.html';
 
     me = { id:user.uid, nick:myProfile.nick ?? '' };
-    let usersSnap, levelsSnap, allCompSnap, approvedSnap, scoreSnap, ratingsSnap;
+    let usersSnap, levelsSnap, allCompSnap, approvedSnap, scoreSnap, ratingsSnap, levelSubsSnap;
     try{ usersSnap = await getDocs(query(collection(db,'users'), orderBy('points','desc'))); } catch { usersSnap = { forEach: ()=>{} }; }
     try{ levelsSnap = await getDocs(query(collection(db,'levels'), orderBy('rank','asc'))); } catch { levelsSnap = { forEach: ()=>{} }; }
     try{ allCompSnap = await getDocs(collection(db,'completion_submissions')); } catch { allCompSnap = { forEach: ()=>{} }; }
@@ -325,6 +328,7 @@ onAuthStateChanged(auth, async user => {
     try{ ratingsSnap = await getDocs(collection(db,'level_ratings')); } catch {
       try{ ratingsSnap = await getDocs(query(collection(db,'level_ratings'), where('levelId','!=',''))); } catch { ratingsSnap = { forEach: ()=>{} }; }
     }
+    try{ levelSubsSnap = await getDocs(collection(db,'level_submissions')); } catch { levelSubsSnap = { forEach: ()=>{} }; }
 
     const sv = scoreSnap.exists() ? scoreSnap.data() : {};
     scoring = { alphaA: Number(sv.alphaA ?? 4) };
@@ -359,6 +363,9 @@ onAuthStateChanged(auth, async user => {
       if(!levelRatingsByLevelId.has(r.levelId)) levelRatingsByLevelId.set(r.levelId, []);
       levelRatingsByLevelId.get(r.levelId).push(r);
     });
+
+    levelSubmissionById = new Map();
+    levelSubsSnap.forEach(d=> levelSubmissionById.set(d.id, { id:d.id, ...d.data() }));
 
     allCompletions = [];
     allCompSnap.forEach(d=>allCompletions.push({ id:d.id, ...d.data() }));
