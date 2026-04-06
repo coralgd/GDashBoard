@@ -214,6 +214,8 @@ async function loadData(){
     getDocs(collection(db,'appeals')),
     getDocs(collection(db,'point_awards'))
   ]);
+  let awardsSnap = null;
+  try { awardsSnap = await getDocs(collection(db,'point_awards')); } catch {}
 
   const levelNameById = new Map();
   const levelNameByRank = new Map();
@@ -256,11 +258,13 @@ async function loadData(){
     addToPair(levelName, player, 'appeal', x);
     addCommentIfNeeded(levelName, player, x);
   });
-  awardsSnap.forEach(d=>{
-    const x = d.data();
-    const player = normalizeName(x.playerNick, 'Без ника');
-    addToPair('Начисления', player, 'awards', x);
-  });
+  if(awardsSnap){
+    awardsSnap.forEach(d=>{
+      const x = d.data();
+      const player = normalizeName(x.playerNick, 'Без ника');
+      addToPair('Начисления', player, 'awards', x);
+    });
+  }
 }
 
 function formatDate(ts){

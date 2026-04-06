@@ -15,6 +15,8 @@
     .layout{grid-template-columns:1fr}
     .side-tools{position:static}
   }
+  .danger-backdrop{background:rgba(0,0,0,.92)!important;animation:pulseDanger 2.4s ease-in-out infinite}
+  @keyframes pulseDanger{0%{background:rgba(0,0,0,.92)}50%{background:rgba(110,0,0,.95)}100%{background:rgba(0,0,0,.92)}}
 </style>
 </head>
 <body>
@@ -61,6 +63,18 @@
       <button id="closePlayerModal" class="btn-ghost">Закрыть</button>
     </div>
     <div id="playerBody"></div>
+  </div>
+</div>
+
+<div id="siteModal" class="dialog-backdrop">
+  <div class="dialog" style="max-width:560px;">
+    <h3 id="siteModalTitle">Сообщение</h3>
+    <p id="siteModalText"></p>
+    <p id="siteModalHint" class="small"></p>
+    <div class="top-actions">
+      <button id="siteModalCancel" class="btn-ghost">Отмена</button>
+      <button id="siteModalOk">Ок</button>
+    </div>
   </div>
 </div>
 
@@ -122,6 +136,51 @@ let levelsCache = [];
 let scoring = { maximumPoints:100, rankDecayFactor:3, repeatPenaltyPower:0.5 };
 let pendingSubmissions = [];
 let usersCache = [];
+const siteModal = document.getElementById('siteModal');
+
+function closeSiteModal(){ siteModal.classList.remove('open'); siteModal.classList.remove('danger-backdrop'); }
+function showModalMessage(text, title='Сообщение'){
+  document.getElementById('siteModalTitle').textContent = title;
+  document.getElementById('siteModalText').textContent = text;
+  document.getElementById('siteModalHint').textContent = '';
+  const cancel = document.getElementById('siteModalCancel');
+  const ok = document.getElementById('siteModalOk');
+  cancel.style.display = 'none';
+  ok.disabled = false;
+  ok.textContent = 'Понятно';
+  ok.onclick = ()=> closeSiteModal();
+  siteModal.classList.add('open');
+}
+function askDanger(text, title='Подтверждение'){
+  return new Promise(resolve=>{
+    document.getElementById('siteModalTitle').textContent = title;
+    document.getElementById('siteModalText').textContent = text;
+    const hint = document.getElementById('siteModalHint');
+    const cancel = document.getElementById('siteModalCancel');
+    const ok = document.getElementById('siteModalOk');
+    let left = 3;
+    hint.textContent = `Подтверждение будет доступно через ${left} сек.`;
+    ok.textContent = `Подождите ${left}`;
+    ok.disabled = true;
+    cancel.style.display = '';
+    siteModal.classList.add('open');
+    siteModal.classList.add('danger-backdrop');
+    const timer = setInterval(()=>{
+      left -= 1;
+      if(left<=0){
+        clearInterval(timer);
+        hint.textContent = 'Можно подтвердить действие.';
+        ok.textContent = 'Подтвердить';
+        ok.disabled = false;
+      } else {
+        hint.textContent = `Подтверждение будет доступно через ${left} сек.`;
+        ok.textContent = `Подождите ${left}`;
+      }
+    },1000);
+    cancel.onclick = ()=>{ clearInterval(timer); closeSiteModal(); resolve(false); };
+    ok.onclick = ()=>{ if(ok.disabled)return; clearInterval(timer); closeSiteModal(); resolve(true); };
+  });
+}
 
 function setPanel(name){
   currentPanel = name;
@@ -165,7 +224,7 @@ async function logModeratorAction(action, details = {}){
       details,
       actorUid: me.uid,
       actorNick: me.nick ?? 'moderator',
-      actorRole: 'moderator',
+      actorRole: me.role ?? 'moderator',
       createdAt: serverTimestamp()
     });
   } catch (_) {}
@@ -241,11 +300,7 @@ async function loadPlayers(){
   ]);
 
   usersCache = [];
-  usersSnap.forEach(d=>{
-    const u = d.data();
-    if(u.role==='moderator' || u.role==='elder') return;
-    usersCache.push({id:d.id,...u});
-  });
+  usersSnap.forEach(d=> usersCache.push({id:d.id,...d.data()}));
   usersCache.sort((a,b)=>Number(b.points ?? 0)-Number(a.points ?? 0));
 
   playersPanel.innerHTML = `
@@ -268,7 +323,9 @@ async function loadPlayers(){
       rank = idx + 1;
       const row = document.createElement('div');
       row.className = 'row list-item clickable';
-      row.innerHTML = `<div>${rank}</div><div>${u.nick ?? 'Без ника'}</div><div>${Number(u.points ?? 0)}</div>`;
+      if(u.role==='moderator') row.classList.add('moderator');
+      if(u.role==='elder') row.classList.add('elder');
+      row.innerHTML = `<div>${rank}</div><div>${u.nick ?? 'Без ника'} <span class="small">(${u.role ?? 'player'})</span></div><div>${Number(u.points ?? 0)}</div>`;
       row.onclick = ()=> openPlayerModalForModerator(u.id);
       list.appendChild(row);
     });
@@ -358,8 +415,8 @@ async function openPlayerModalForModerator(playerId){
   };
   document.getElementById('sendModMessage').onclick = async ()=>{
     const text = document.getElementById('modMessageText').value.trim();
-    if(!text) return alert('Введите текст сообщения');
-    await addDoc(collection(db,'moderator_messages'), { toUid: playerId, toNick: player.nick ?? 'Без ника', fromUid: me.uid, fromNick: me.nick ?? 'moderator', fromRole:'moderator', text, createdAt: serverTimestamp(), readAt: null });
+    if(!text) return showModalMessage('Введите текст сообщения');
+    await addDoc(collection(db,'moderator_messages'), { toUid: playerId, toNick: player.nick ?? 'Без ника', fromUid: me.uid, fromNick: me.nick ?? 'moderator', fromRole: me.role ?? 'moderator', text, createdAt: serverTimestamp(), readAt: null });
     await logModeratorAction('send_message_to_player', { toUid: playerId, toNick: player.nick ?? 'Без ника' });
     document.getElementById('modMessageText').value = '';
   };
@@ -439,7 +496,7 @@ async function applyPendingVerdict(item, verdict){
     const payload = { status: verdict, note, reviewedBy: me.uid, reviewedAt: serverTimestamp() };
     if(verdict==='approved'){
       const rank = Number(document.getElementById('pendingRank')?.value || 0);
-      if(!rank) return alert('Укажи место в листе');
+      if(!rank) return showModalMessage('Укажи место в листе');
       const ref = await addDoc(collection(db,'levels'), {
         rank, text:item.text ?? '', link:item.link ?? '', fileUrl:item.fileUrl ?? '',
         builder:item.builder ?? '—', verifier:item.verifier ?? '—', status:'active',
@@ -458,7 +515,7 @@ async function applyPendingVerdict(item, verdict){
     if(verdict==='approved'){
       const levelId = document.getElementById('pendingLevel')?.value || '';
       const level = levelsCache.find(l=>l.id===levelId);
-      if(!level) return alert('Выбери уровень');
+      if(!level) return showModalMessage('Выбери уровень');
       const approvedSnap = await getDocs(query(collection(db,'completion_submissions'), where('playerId','==',item.playerId), where('status','==','approved')));
       const k = approvedSnap.size + 1;
       const size = Math.max(2, levelsCache.length);
@@ -524,7 +581,7 @@ onAuthStateChanged(auth, async user => {
     if(data.accountFrozen) return location.href='index.html';
     if(data.role!=='moderator' && data.role!=='elder') return location.href='main.html';
 
-    me = { uid:user.uid, nick:data.nick ?? 'moderator' };
+    me = { uid:user.uid, nick:data.nick ?? 'moderator', role:data.role ?? 'moderator' };
     await Promise.all([loadPlayers(), loadListMenu(), loadScoring()]);
     setPanel('players');
     statusEl.textContent='';

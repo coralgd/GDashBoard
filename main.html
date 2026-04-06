@@ -47,18 +47,25 @@ async function renderMessages(userId){
   card.innerHTML = '<h3 style="margin-top:0">Сообщения модераторов</h3><div id="messagesBody">Загрузка…</div>';
   container.appendChild(card);
   const body = document.getElementById('messagesBody');
-  const snap = await getDocs(query(collection(db,'moderator_messages'), where('toUid','==',userId), orderBy('createdAt','desc')));
-  if(snap.empty){body.innerHTML='<p class="small">Сообщений пока нет.</p>';return;}
-  let html = '';
-  const unread = [];
-  snap.forEach(d=>{
-    const m = { id:d.id, ...d.data() };
-    if(!m.readAt) unread.push(d.id);
-    const when = m.createdAt?.seconds ? new Date(m.createdAt.seconds*1000).toLocaleString('ru-RU') : '—';
-    html += `<div class="list-item"><b>${m.fromNick ?? 'Модератор'}</b><p>${m.text ?? ''}</p><p class="small">${when}${m.readAt ? '' : ' · новое'}</p></div>`;
-  });
-  body.innerHTML = html;
-  await Promise.all(unread.map(id=>updateDoc(doc(db,'moderator_messages',id), { readAt: serverTimestamp() })));
+  try{
+    const snap = await getDocs(query(collection(db,'moderator_messages'), where('toUid','==',userId)));
+    if(snap.empty){body.innerHTML='<p class="small">Сообщений пока нет.</p>';return;}
+    const rows = [];
+    const unread = [];
+    snap.forEach(d=>{
+      const m = { id:d.id, ...d.data() };
+      rows.push(m);
+      if(!m.readAt) unread.push(d.id);
+    });
+    rows.sort((a,b)=>(b.createdAt?.seconds ?? 0)-(a.createdAt?.seconds ?? 0));
+    body.innerHTML = rows.map(m=>{
+      const when = m.createdAt?.seconds ? new Date(m.createdAt.seconds*1000).toLocaleString('ru-RU') : '—';
+      return `<div class="list-item"><b>${m.fromNick ?? 'Модератор'}</b><p>${m.text ?? ''}</p><p class="small">${when}${m.readAt ? '' : ' · новое'}</p></div>`;
+    }).join('');
+    await Promise.all(unread.map(id=>updateDoc(doc(db,'moderator_messages',id), { readAt: serverTimestamp() })));
+  } catch {
+    body.innerHTML = '<p class="small">Сообщения временно недоступны.</p>';
+  }
 }
 
 onAuthStateChanged(auth, async user => {
