@@ -55,6 +55,7 @@ const state = {
   search: '',
   levels: new Map(), // level -> Map(player -> types)
   players: new Map(), // player -> Map(level -> types)
+  modLog: new Map(), // nick -> Map(action -> items)
   view: 'root',
   rootType: '', // level|player
   rootName: '',
@@ -67,17 +68,18 @@ const TYPE_LABELS = {
   appeal: 'апелляции',
   comments: 'комментарии модера',
   placement: 'заявки на постановку',
-  awards: 'начисления'
+  awards: 'начисления',
+  messages: 'сообщения'
 };
 
 function ensurePair(levelName, playerName){
   if(!state.levels.has(levelName)) state.levels.set(levelName, new Map());
   const byPlayer = state.levels.get(levelName);
-  if(!byPlayer.has(playerName)) byPlayer.set(playerName, { completion:[], appeal:[], comments:[], placement:[], awards:[] });
+  if(!byPlayer.has(playerName)) byPlayer.set(playerName, { completion:[], appeal:[], comments:[], placement:[], awards:[], messages:[] });
 
   if(!state.players.has(playerName)) state.players.set(playerName, new Map());
   const byLevel = state.players.get(playerName);
-  if(!byLevel.has(levelName)) byLevel.set(levelName, { completion:[], appeal:[], comments:[], placement:[], awards:[] });
+  if(!byLevel.has(levelName)) byLevel.set(levelName, { completion:[], appeal:[], comments:[], placement:[], awards:[], messages:[] });
 
   return { byPlayer: byPlayer.get(playerName), byLevel: byLevel.get(levelName) };
 }
@@ -105,6 +107,9 @@ function matchName(name, q){
 
 function breadcrumb(){
   if(state.view==='root') return 'Корень';
+  if(state.view==='modLogUsers') return 'Журнал модеров';
+  if(state.view==='modLogTypes') return `Журнал модеров → ${state.rootName}`;
+  if(state.view==='modLogItems') return `Журнал модеров → ${state.rootName} → ${state.secondName}`;
   if(state.view==='levelPlayers') return `Уровень: ${state.rootName}`;
   if(state.view==='playerLevels') return `Игрок: ${state.rootName}`;
   if(state.view==='pairTypes') return `${state.rootType==='level'?'Уровень':'Игрок'}: ${state.rootName} → ${state.secondName}`;
@@ -136,7 +141,10 @@ function render(){
 
   if(state.view==='root'){
     if(!q){
-      content.innerHTML = '<p>Введите поиск, чтобы открыть папки архива.</p>';
+      content.innerHTML = `<div class="row folder" data-type="modlog" data-name="Журнал модеров">📁 <b>Журнал модеров</b></div><p class="small">Введите поиск, чтобы открыть папки «уровень/игрок».</p>`;
+      content.querySelectorAll('.folder').forEach(el=>el.onclick=()=>{
+        if(el.dataset.type==='modlog'){ state.view='modLogUsers'; state.rootType='modlog'; state.rootName=''; state.secondName=''; state.itemType=''; render(); }
+      });
       return;
     }
 
@@ -151,9 +159,10 @@ function render(){
     let html='';
     levelHits.forEach(name=> html += `<div class="row folder" data-type="level" data-name="${name}">📁 <b>${name}</b> <span class="tag">уровень</span></div>`);
     playerHits.forEach(name=> html += `<div class="row folder" data-type="player" data-name="${name}">📁 <b>${name}</b> <span class="tag">игрок</span></div>`);
-    content.innerHTML = html;
+    content.innerHTML = `<div class="row folder" data-type="modlog" data-name="Журнал модеров">📁 <b>Журнал модеров</b></div>${html}`;
 
     content.querySelectorAll('.folder').forEach(el=>el.onclick=()=>{
+      if(el.dataset.type==='modlog'){ state.view='modLogUsers'; state.rootType='modlog'; state.rootName=''; state.secondName=''; state.itemType=''; render(); return; }
       state.rootType = el.dataset.type;
       state.rootName = el.dataset.name;
       state.secondName = '';
@@ -161,6 +170,30 @@ function render(){
       state.view = state.rootType === 'level' ? 'levelPlayers' : 'playerLevels';
       render();
     });
+    return;
+  }
+
+  if(state.view==='modLogUsers'){
+    const names = Array.from(state.modLog.keys()).filter(x=>!q||matchName(x,q)).sort((a,b)=>a.localeCompare(b,'ru'));
+    if(!names.length){ content.innerHTML='<p>Журнал модераторов пуст.</p>'; return; }
+    content.innerHTML = names.map(n=>`<div class="row folder" data-name="${n}">📁 <b>${n}</b> <span class="tag">модер</span></div>`).join('');
+    content.querySelectorAll('.folder').forEach(el=>el.onclick=()=>{ state.rootName=el.dataset.name; state.view='modLogTypes'; render(); });
+    return;
+  }
+  if(state.view==='modLogTypes'){
+    const byType = state.modLog.get(state.rootName) ?? new Map();
+    const types = Array.from(byType.keys()).filter(x=>!q||matchName(x,q)).sort((a,b)=>a.localeCompare(b,'ru'));
+    if(!types.length){ content.innerHTML='<p>Типов действий нет.</p>'; return; }
+    content.innerHTML = types.map(t=>`<div class="row folder" data-name="${t}">📁 <b>${t}</b> <span class="small">(${(byType.get(t)??[]).length})</span></div>`).join('');
+    content.querySelectorAll('.folder').forEach(el=>el.onclick=()=>{ state.secondName=el.dataset.name; state.view='modLogItems'; render(); });
+    return;
+  }
+  if(state.view==='modLogItems'){
+    const rows = (state.modLog.get(state.rootName)?.get(state.secondName) ?? [])
+      .filter(x=>!q||JSON.stringify(x).toLowerCase().includes(q))
+      .sort((a,b)=>(b.createdAt?.seconds ?? 0)-(a.createdAt?.seconds ?? 0));
+    if(!rows.length){ content.innerHTML='<p>Записей нет.</p>'; return; }
+    content.innerHTML = rows.map((x,i)=>`<div class="card"><b>#${i+1}</b><p class="small">${formatDate(x.createdAt)}</p><pre class="small" style="white-space:pre-wrap;margin:0;">${JSON.stringify(x.details ?? {}, null, 2)}</pre></div>`).join('');
     return;
   }
 
@@ -216,6 +249,10 @@ async function loadData(){
   ]);
   let awardsSnap = null;
   try { awardsSnap = await getDocs(collection(db,'point_awards')); } catch {}
+  let messagesSnap = null;
+  try { messagesSnap = await getDocs(collection(db,'messages')); } catch {}
+  let modActionsSnap = null;
+  try { modActionsSnap = await getDocs(collection(db,'moderator_actions')); } catch {}
 
   const levelNameById = new Map();
   const levelNameByRank = new Map();
@@ -227,6 +264,7 @@ async function loadData(){
 
   state.levels = new Map();
   state.players = new Map();
+  state.modLog = new Map();
 
   ls.forEach(d=>{
     const x = d.data();
@@ -263,6 +301,25 @@ async function loadData(){
       const x = d.data();
       const player = normalizeName(x.playerNick, 'Без ника');
       addToPair('Начисления', player, 'awards', x);
+    });
+  }
+  if(messagesSnap){
+    messagesSnap.forEach(d=>{
+      const x = d.data();
+      const toNick = normalizeName(x.toNick, 'Получатель');
+      const fromNick = normalizeName(x.fromNick, 'Отправитель');
+      addToPair('Сообщения', toNick, 'messages', { ...x, text: `[от ${fromNick}] ${x.text ?? ''}` });
+    });
+  }
+  if(modActionsSnap){
+    modActionsSnap.forEach(d=>{
+      const x = d.data();
+      const nick = normalizeName(x.actorNick, 'Без ника');
+      const type = normalizeName(x.action, 'action');
+      if(!state.modLog.has(nick)) state.modLog.set(nick, new Map());
+      const byType = state.modLog.get(nick);
+      if(!byType.has(type)) byType.set(type, []);
+      byType.get(type).push(x);
     });
   }
 }
@@ -302,14 +359,8 @@ onAuthStateChanged(auth, async user=>{
     const meSnap = await getDoc(doc(db,'users',user.uid));
     const me = meSnap.exists() ? meSnap.data() : null;
     if(!me || me.situation!=='verified') return location.href='nick.html';
-    if(me.role!=='moderator' && me.role!=='elder') return location.href='main.html';
-    if(isElderRole(me.role)){
-      openModeratorLogBtn.classList.remove('hidden');
-      openModeratorLogBtn.style.display = '';
-    } else {
-      openModeratorLogBtn.classList.add('hidden');
-      openModeratorLogBtn.style.display = 'none';
-    }
+    openModeratorLogBtn.classList.remove('hidden');
+    openModeratorLogBtn.style.display = '';
 
     await loadData();
     statusEl.textContent='';

@@ -48,7 +48,12 @@ async function renderMessages(userId){
   container.appendChild(card);
   const body = document.getElementById('messagesBody');
   try{
-    const snap = await getDocs(query(collection(db,'moderator_messages'), where('toUid','==',userId)));
+    let snap;
+    try{
+      snap = await getDocs(query(collection(db,'messages'), where('toUid','==',userId)));
+    } catch {
+      snap = await getDocs(query(collection(db,'moderator_messages'), where('toUid','==',userId)));
+    }
     if(snap.empty){body.innerHTML='<p class="small">Сообщений пока нет.</p>';return;}
     const rows = [];
     const unread = [];
