@@ -107,12 +107,6 @@ function levelRatingStats(levelId){
   if(!rows.length) return { count:0, avgDifficulty:'—', avgCoolness:'—', my:null };
   const my = rows.find(x=>x.userId===me?.id) ?? null;
 
-  const difficultyCounts = new Map();
-  const coolnessCounts = new Map();
-  rows.forEach(x=>{
-    if(x.difficulty) difficultyCounts.set(x.difficulty, (difficultyCounts.get(x.difficulty) ?? 0) + 1);
-    if(x.coolness) coolnessCounts.set(x.coolness, (coolnessCounts.get(x.coolness) ?? 0) + 1);
-  });
 
   const avgRoundedByIndex = (options, field)=>{
     const nums = rows.map(x=>options.indexOf(x[field])).filter(i=>i>=0);
