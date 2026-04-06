@@ -42,6 +42,8 @@
   <div class="layout">
     <div>
       <h2 id="listTitle" style="margin-top:0;">Список игроков</h2>
+      <label id="mainSearchLabel" for="mainSearch">Поиск</label>
+      <input id="mainSearch" placeholder="Ник, роль, название уровня, ранг">
       <div class="row small"><div>#</div><div>Ник / Название</div><div>Параметр</div></div>
       <div id="listContainer"></div>
     </div>
@@ -52,6 +54,7 @@
         <button id="openSubmissions" class="toolbar-btn btn-success">Отправки</button>
         <button id="openAddLevel" class="toolbar-btn">Добавить</button>
         <button id="openArchive" class="toolbar-btn btn-ghost">Архив</button>
+        <button id="openScoring" class="toolbar-btn">Параметры очков</button>
         <p class="small">Нажми на игрока или уровень, чтобы открыть подробное окно управления.</p>
       </div>
     </aside>
@@ -372,9 +375,16 @@ function renderMainList(){
   toggleListBtn.textContent = showPlayers ? 'Показать уровни' : 'Показать игроков';
   listContainer.innerHTML = '';
 
-  const items = showPlayers
+  const q = (document.getElementById('mainSearch')?.value || '').trim().toLowerCase();
+  const baseItems = showPlayers
     ? players
     : levels.filter(x=>x.status!=='archived').sort((a,b)=>Number(a.rank??9999)-Number(b.rank??9999));
+  const items = baseItems.filter(item=>{
+    const hay = showPlayers
+      ? `${item.nick ?? ''} ${item.role ?? ''} ${item.email ?? ''}`.toLowerCase()
+      : `${item.text ?? ''} ${item.rank ?? ''} ${item.builder ?? ''} ${item.verifier ?? ''}`.toLowerCase();
+    return !q || hay.includes(q);
+  });
 
   if(!items.length){
     listContainer.innerHTML = `<p>${showPlayers ? 'Игроков нет.' : 'Уровней нет.'}</p>`;
@@ -514,7 +524,11 @@ async function openPlayerModal(playerId){
   document.getElementById('sendModMessage').onclick = async ()=>{
     const text = document.getElementById('modMessageText').value.trim();
     if(!text) return showModalMessage('Введите текст сообщения');
-    await addDoc(collection(db,'messages'), { toUid: playerId, toNick: player.nick ?? 'Без ника', fromUid: me.uid, fromNick: me.nick ?? 'elder', fromRole: 'elder', text, createdAt: serverTimestamp(), readAt: null });
+    try {
+      await addDoc(collection(db,'messages'), { toUid: playerId, toNick: player.nick ?? 'Без ника', fromUid: me.uid, fromNick: me.nick ?? 'elder', fromRole: 'elder', text, createdAt: serverTimestamp(), readAt: null });
+    } catch {
+      await addDoc(collection(db,'moderator_messages'), { toUid: playerId, toNick: player.nick ?? 'Без ника', fromUid: me.uid, fromNick: me.nick ?? 'elder', fromRole: 'elder', text, createdAt: serverTimestamp(), readAt: null });
+    }
     await logModeratorAction('send_message_to_player', { toUid: playerId, toNick: player.nick ?? 'Без ника' });
     document.getElementById('modMessageText').value = '';
   };
@@ -773,6 +787,8 @@ onAuthStateChanged(auth, async user=>{
 document.getElementById('backMain').onclick = ()=> location.href='main.html';
 document.getElementById('toggleList').onclick = ()=>{ showPlayers = !showPlayers; renderMainList(); };
 document.getElementById('openArchive').onclick = ()=> location.href='archive.html';
+document.getElementById('openScoring').onclick = ()=> location.href='elder-levels.html';
+document.getElementById('mainSearch').oninput = ()=> renderMainList();
 
 document.getElementById('openSubmissions').onclick = ()=>{ selectedSubmissionId = ''; renderSubmissionList(); submissionsModal.classList.add('open'); };
 document.getElementById('closeSubmissions').onclick = ()=> submissionsModal.classList.remove('open');
