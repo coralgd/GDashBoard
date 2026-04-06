@@ -434,7 +434,7 @@ async function openPlayerModal(playerId){
       <div class="top-actions">
         <button id="savePlayer">Сохранить профиль</button>
         <button id="toggleVerify" class="${verNegative ? 'danger' : ''}">${verNegative ? 'Снять верификацию' : 'Верифицировать'}</button>
-        <button id="toggleFreeze" class="${player.accountFrozen ? '' : 'danger'}">${player.accountFrozen ? 'Разморозить аккаунт' : 'Заморозить аккаунт'}</button>
+        <button id="toggleFreeze" class="${player.situation==='frozen' ? '' : 'danger'}">${player.situation==='frozen' ? 'Разморозить аккаунт' : 'Заморозить аккаунт'}</button>
         <button id="deletePlayer" class="danger">Удалить аккаунт</button>
       </div>
       <label>Сообщение игроку</label>
@@ -503,10 +503,10 @@ async function openPlayerModal(playerId){
     await openPlayerModal(playerId);
   };
   document.getElementById('toggleFreeze').onclick = async ()=>{
-    const next = !Boolean(player.accountFrozen);
+    const next = player.situation!=='frozen';
     const reason = next ? 'Заморожено старшим модератором' : '';
-    await updateDoc(doc(db,'users',playerId), { accountFrozen: next, frozenReason: reason, frozenAt: next ? serverTimestamp() : null, frozenBy: next ? me.uid : null });
-    await logModeratorAction('toggle_player_freeze', { playerId, accountFrozen: next, reason });
+    await updateDoc(doc(db,'users',playerId), { situation: next ? 'frozen' : 'verified', accountFrozen: next, frozenReason: reason, frozenAt: next ? serverTimestamp() : null, frozenBy: next ? me.uid : null });
+    await logModeratorAction('toggle_player_freeze', { playerId, situation: next ? 'frozen' : 'verified', reason });
     await loadData();
     renderMainList();
     await openPlayerModal(playerId);
@@ -514,7 +514,7 @@ async function openPlayerModal(playerId){
   document.getElementById('sendModMessage').onclick = async ()=>{
     const text = document.getElementById('modMessageText').value.trim();
     if(!text) return showModalMessage('Введите текст сообщения');
-    await addDoc(collection(db,'moderator_messages'), { toUid: playerId, toNick: player.nick ?? 'Без ника', fromUid: me.uid, fromNick: me.nick ?? 'elder', fromRole: 'elder', text, createdAt: serverTimestamp(), readAt: null });
+    await addDoc(collection(db,'messages'), { toUid: playerId, toNick: player.nick ?? 'Без ника', fromUid: me.uid, fromNick: me.nick ?? 'elder', fromRole: 'elder', text, createdAt: serverTimestamp(), readAt: null });
     await logModeratorAction('send_message_to_player', { toUid: playerId, toNick: player.nick ?? 'Без ника' });
     document.getElementById('modMessageText').value = '';
   };
@@ -756,8 +756,8 @@ onAuthStateChanged(auth, async user=>{
   try {
     const meSnap = await getDoc(doc(db,'users',user.uid));
     const profile = meSnap.exists() ? meSnap.data() : null;
-    if(!profile || profile.situation!=='verified') return location.href='nick.html';
-    if(profile.accountFrozen) return location.href='index.html';
+    if(!profile || (profile.situation!=='verified' && profile.situation!=='frozen')) return location.href='nick.html';
+    if(profile.situation==='frozen' || profile.accountFrozen) return location.href='index.html';
     if(profile.role!=='elder') return location.href='main.html';
 
     me = { uid:user.uid, nick:profile.nick ?? 'elder' };

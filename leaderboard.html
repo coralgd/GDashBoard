@@ -267,7 +267,7 @@ onAuthStateChanged(auth, async user => {
 
     usersSnap.forEach(d => {
       const u = d.data();
-      if(u.situation !== 'verified') return;
+      if(u.situation !== 'verified' && u.situation !== 'frozen') return;
       const points = Number(u.points ?? 0);
       seen += 1;
       if(lastPoints !== points){ rank = seen; lastPoints = points; }
@@ -297,7 +297,7 @@ onAuthStateChanged(auth, async user => {
     statusEl.textContent = '';
     setView('players');
   } catch (e) {
-    statusEl.textContent = getNetworkErrorMessage(e);
+    statusEl.textContent = 'Лидерборд временно недоступен. Попробуйте позже.';
   }
 });
 </script>

@@ -44,14 +44,15 @@ async function renderMessages(userId){
   const card = document.createElement('div');
   card.className = 'card';
   card.id = 'messagesCard';
-  card.innerHTML = '<h3 style="margin-top:0">Сообщения модераторов</h3><div id="messagesBody">Загрузка…</div>';
+  card.innerHTML = '<h3 style="margin-top:0">Сообщения</h3><div id="messagesBody">Загрузка…</div>';
   container.appendChild(card);
   const body = document.getElementById('messagesBody');
   try{
-    let snap;
+    let snap, sourceCollection = 'messages';
     try{
       snap = await getDocs(query(collection(db,'messages'), where('toUid','==',userId)));
     } catch {
+      sourceCollection = 'moderator_messages';
       snap = await getDocs(query(collection(db,'moderator_messages'), where('toUid','==',userId)));
     }
     if(snap.empty){body.innerHTML='<p class="small">Сообщений пока нет.</p>';return;}
@@ -67,7 +68,7 @@ async function renderMessages(userId){
       const when = m.createdAt?.seconds ? new Date(m.createdAt.seconds*1000).toLocaleString('ru-RU') : '—';
       return `<div class="list-item"><b>${m.fromNick ?? 'Модератор'}</b><p>${m.text ?? ''}</p><p class="small">${when}${m.readAt ? '' : ' · новое'}</p></div>`;
     }).join('');
-    await Promise.all(unread.map(id=>updateDoc(doc(db,'moderator_messages',id), { readAt: serverTimestamp() })));
+    await Promise.all(unread.map(id=>updateDoc(doc(db,sourceCollection,id), { readAt: serverTimestamp() }).catch(()=>{})));
   } catch {
     body.innerHTML = '<p class="small">Сообщения временно недоступны.</p>';
   }
@@ -78,8 +79,8 @@ onAuthStateChanged(auth, async user => {
   try {
     const userSnap = await getDoc(doc(db,'users',user.uid));
     const profile = userSnap.exists() ? userSnap.data() : null;
-    if(!profile || profile.situation !== 'verified') return location.href='nick.html';
-    if(profile.accountFrozen){
+    if(!profile || (profile.situation !== 'verified' && profile.situation !== 'frozen')) return location.href='nick.html';
+    if(profile.situation==='frozen' || profile.accountFrozen){
       err.textContent = profile.frozenReason ? `Аккаунт заморожен: ${profile.frozenReason}` : 'Аккаунт заморожен. Вход запрещен.';
       setTimeout(()=>location.href='index.html', 1200);
       return;
@@ -91,7 +92,7 @@ onAuthStateChanged(auth, async user => {
     let rank = 0, place = '—', last = null, seen = 0;
     usersSnap.forEach(d=>{
       const u = d.data();
-      if(u.situation!=='verified') return;
+      if(u.situation!=='verified' && u.situation!=='frozen') return;
       seen++;
       if(u.points !== last){ rank = seen; last = u.points; }
       if(d.id===user.uid) place = String(rank);

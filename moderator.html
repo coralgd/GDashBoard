@@ -416,7 +416,7 @@ async function openPlayerModalForModerator(playerId){
   document.getElementById('sendModMessage').onclick = async ()=>{
     const text = document.getElementById('modMessageText').value.trim();
     if(!text) return showModalMessage('Введите текст сообщения');
-    await addDoc(collection(db,'moderator_messages'), { toUid: playerId, toNick: player.nick ?? 'Без ника', fromUid: me.uid, fromNick: me.nick ?? 'moderator', fromRole: me.role ?? 'moderator', text, createdAt: serverTimestamp(), readAt: null });
+    await addDoc(collection(db,'messages'), { toUid: playerId, toNick: player.nick ?? 'Без ника', fromUid: me.uid, fromNick: me.nick ?? 'moderator', fromRole: me.role ?? 'moderator', text, createdAt: serverTimestamp(), readAt: null });
     await logModeratorAction('send_message_to_player', { toUid: playerId, toNick: player.nick ?? 'Без ника' });
     document.getElementById('modMessageText').value = '';
   };
@@ -577,8 +577,8 @@ onAuthStateChanged(auth, async user => {
   try {
     const meSnap = await getDoc(doc(db,'users',user.uid));
     const data = meSnap.exists() ? meSnap.data() : null;
-    if(!data || data.situation!=='verified') return location.href='nick.html';
-    if(data.accountFrozen) return location.href='index.html';
+    if(!data || (data.situation!=='verified' && data.situation!=='frozen')) return location.href='nick.html';
+    if(data.situation==='frozen' || data.accountFrozen) return location.href='index.html';
     if(data.role!=='moderator' && data.role!=='elder') return location.href='main.html';
 
     me = { uid:user.uid, nick:data.nick ?? 'moderator', role:data.role ?? 'moderator' };
