@@ -3,15 +3,74 @@
 import { auth, db, getNetworkErrorMessage } from './firebase.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
 import { addDoc, collection, doc, getDoc, getDocs, query, serverTimestamp, updateDoc, where } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
-const status=document.getElementById('status');let meRef=null,levels=[],scoring={maximumPoints:100,rankDecayFactor:3,repeatPenaltyPower:.5};
-function calc(rank,size,k){const n=Math.max(2,Number(size||2));const r=Math.max(1,Math.min(Number(rank||1),n));const x=(r-1)/(n-1);return Math.round((scoring.maximumPoints*Math.exp(-scoring.rankDecayFactor*x)/Math.pow(Math.max(1,k),scoring.repeatPenaltyPower))*100)/100;}
+const status=document.getElementById('status');let meRef=null,levels=[],scoring={alphaA:4};
+const DIFFICULTY_OPTIONS=['auto 1','easy 2','normal 3','hard 4','harder 5','harder 6','harder 7','insane 8','insane 9','easy demon','medium demon','hard demon','insane demon','extreme demon'];
+const COOLNESS_OPTIONS=['star rate','feature','epic','legendary','mythic'];
+function completionTerm(rank,size){const n=Math.max(2,Number(size||2));const r=Math.max(1,Math.min(Number(rank||1),n));const x=(r-1)/(n-1);return Math.exp(-Number(scoring.alphaA??4)*x);}
+function totalScoreByRanks(ranks,size){const sum=ranks.reduce((a,rank)=>a+completionTerm(rank,size),0);return Math.round((190*(1-Math.exp(-sum)))*100)/100;}
+function calc(rank,size,existingRanks=[]){const before=totalScoreByRanks(existingRanks,size);const after=totalScoreByRanks([...existingRanks,Number(rank||1)],size);return Math.round((after-before)*100)/100;}
 const modal=document.getElementById('modal');document.getElementById('back').onclick=()=>location.href='moderator.html';document.getElementById('mClose').onclick=()=>modal.classList.remove('open');
 document.getElementById('tabLevel').onclick=()=>{document.getElementById('levelPanel').classList.add('active');document.getElementById('compPanel').classList.remove('active');document.getElementById('tabLevel').classList.add('btn-success');document.getElementById('tabComp').classList.remove('btn-success');};
 document.getElementById('tabComp').onclick=()=>{document.getElementById('compPanel').classList.add('active');document.getElementById('levelPanel').classList.remove('active');document.getElementById('tabComp').classList.add('btn-success');document.getElementById('tabLevel').classList.remove('btn-success');};
-async function loadCfg(){const s=await getDoc(doc(db,'settings','scoring'));const v=s.exists()?s.data():{};scoring={maximumPoints:Number(v.maximumPoints??v.maxPoints??100),rankDecayFactor:Number(v.rankDecayFactor??v.decayA??3),repeatPenaltyPower:Number(v.repeatPenaltyPower??v.grindPower??.5)};}
+async function loadCfg(){const s=await getDoc(doc(db,'settings','scoring'));const v=s.exists()?s.data():{};scoring={alphaA:Number(v.alphaA??4)};}
 async function loadLevels(){const snap=await getDocs(collection(db,'levels'));levels=[];snap.forEach(d=>{const l=d.data();if(l.status!=='archived')levels.push({id:d.id,...l});});levels.sort((a,b)=>Number(a.rank??999)-Number(b.rank??999));}
 function open(title,html){document.getElementById('mTitle').textContent=title;document.getElementById('mBody').innerHTML=html;modal.classList.add('open');}
-async function renderLevelSubs(){const box=document.getElementById('levelPanel');box.innerHTML='Загрузка...';const snap=await getDocs(query(collection(db,'level_submissions'),where('status','==','pending')));if(snap.empty){box.innerHTML='<p>Нет заявок.</p>';return;}box.innerHTML='';snap.forEach(d=>{const s=d.data();const card=document.createElement('div');card.className='list-item clickable';card.innerHTML=`<b>${s.nick??'Без ника'}</b><p class='small'>${s.text??''}</p>`;card.onclick=()=>{open(`Заявка уровня: ${s.nick??'Без ника'}`,`<p>${s.text??''}</p><input id='note' placeholder='Комментарий'><input id='rank' type='number' min='1' placeholder='Место'><div class='top-actions'><button id='ok'>Одобрить</button><button id='no' class='btn-danger'>Отклонить</button></div>`);document.getElementById('ok').onclick=async()=>{const rank=Number(document.getElementById('rank').value);if(!rank)return alert('Укажи место');await addDoc(collection(db,'levels'),{link:s.link??'',text:s.text??'',fileUrl:s.fileUrl??'',rank,status:'active',addedBy:meRef.uid,addedByNick:meRef.nick,createdAt:serverTimestamp(),sourceSubmissionId:d.id});await updateDoc(doc(db,'level_submissions',d.id),{status:'approved',note:document.getElementById('note').value.trim(),reviewedBy:meRef.uid,reviewedAt:serverTimestamp(),finalRank:rank});modal.classList.remove('open');await loadLevels();await renderLevelSubs();};document.getElementById('no').onclick=async()=>{await updateDoc(doc(db,'level_submissions',d.id),{status:'rejected',note:document.getElementById('note').value.trim()||'Отклонено',reviewedBy:meRef.uid,reviewedAt:serverTimestamp()});modal.classList.remove('open');await renderLevelSubs();};};box.appendChild(card);});}
-async function renderCompSubs(){const box=document.getElementById('compPanel');box.innerHTML='Загрузка...';const snap=await getDocs(query(collection(db,'completion_submissions'),where('status','==','pending')));if(snap.empty){box.innerHTML='<p>Нет заявок.</p>';return;}box.innerHTML='';const size=Math.max(2,levels.length);snap.forEach(d=>{const s=d.data();const card=document.createElement('div');card.className='list-item clickable';card.innerHTML=`<b>${s.nick??'Без ника'}</b><p class='small'>${s.text??''}</p>`;card.onclick=()=>{const opts=levels.map(l=>`<option value='${l.id}'>#${l.rank} · ${String(l.text??'').slice(0,60)}</option>`).join('');open(`Заявка прохождения: ${s.nick??'Без ника'}`,`<select id='lvl'><option value=''>Выбери уровень</option>${opts}</select><p id='prev' class='small'>Очки: —</p><input id='note' placeholder='Комментарий'><div class='top-actions'><button id='ok'>Подтвердить</button><button id='no' class='btn-danger'>Отклонить</button></div>`);document.getElementById('lvl').onchange=async()=>{const l=levels.find(x=>x.id===document.getElementById('lvl').value);if(!l){document.getElementById('prev').textContent='Очки: —';return;}const cs=await getDocs(query(collection(db,'completion_submissions'),where('playerId','==',s.playerId)));let c=0;cs.forEach(x=>{if(x.data().status==='approved')c++;});document.getElementById('prev').textContent=`Очки: ${calc(l.rank,size,c+1)}`;};document.getElementById('ok').onclick=async()=>{const l=levels.find(x=>x.id===document.getElementById('lvl').value);if(!l)return alert('Выбери уровень');const userRef=doc(db,'users',s.playerId);const us=await getDoc(userRef);const u=us.exists()?us.data():null;if(!u)return alert('Игрок не найден');const cs=await getDocs(query(collection(db,'completion_submissions'),where('playerId','==',s.playerId)));let c=0;cs.forEach(x=>{if(x.data().status==='approved')c++;});const k=c+1;const earned=calc(l.rank,size,k);await updateDoc(userRef,{points:Number(u.points??0)+earned});await updateDoc(doc(db,'completion_submissions',d.id),{status:'approved',note:document.getElementById('note').value.trim(),reviewedBy:meRef.uid,reviewedAt:serverTimestamp(),awardedPoints:earned,listRank:Number(l.rank??1),listQuantity:size,scoreK:k,levelId:l.id});modal.classList.remove('open');await renderCompSubs();};document.getElementById('no').onclick=async()=>{await updateDoc(doc(db,'completion_submissions',d.id),{status:'rejected',note:document.getElementById('note').value.trim()||'Отклонено',reviewedBy:meRef.uid,reviewedAt:serverTimestamp()});modal.classList.remove('open');await renderCompSubs();};};box.appendChild(card);});}
+
+async function renderLevelSubs(){
+  const box=document.getElementById('levelPanel');
+  box.innerHTML=`<div class='card'><label>Поиск</label><input id='levelSearch' placeholder='Ник, текст, ссылка'><label>Фильтр по мнению о сложности</label><select id='levelDifficultyFilter'><option value='all'>Все</option>${DIFFICULTY_OPTIONS.map(x=>`<option value='${x}'>${x}</option>`).join('')}</select><label>Фильтр по мнению о крутости</label><select id='levelCoolnessFilter'><option value='all'>Все</option>${COOLNESS_OPTIONS.map(x=>`<option value='${x}'>${x}</option>`).join('')}</select></div><div id='levelRows'>Загрузка...</div>`;
+  const rows=document.getElementById('levelRows');
+  const snap=await getDocs(query(collection(db,'level_submissions'),where('status','==','pending')));
+  const items=[]; snap.forEach(d=>items.push({id:d.id,...d.data()}));
+  const render=()=>{
+    const q=(document.getElementById('levelSearch').value||'').trim().toLowerCase();
+    const diff=document.getElementById('levelDifficultyFilter').value;
+    const cool=document.getElementById('levelCoolnessFilter').value;
+    const filtered=items.filter(s=>{
+      const hay=`${s.nick??''} ${s.text??''} ${s.link??''}`.toLowerCase();
+      if(q && !hay.includes(q)) return false;
+      if(diff!=='all' && (s.opinionDifficulty??'')!==diff) return false;
+      if(cool!=='all' && (s.opinionCoolness??'')!==cool) return false;
+      return true;
+    });
+    if(!filtered.length){ rows.innerHTML='<p>Нет заявок.</p>'; return; }
+    rows.innerHTML='';
+    filtered.forEach(s=>{
+      const card=document.createElement('div');card.className='list-item clickable';
+      card.innerHTML=`<b>${s.nick??'Без ника'}</b><p class='small'>${s.text??''}</p><p class='small'>Мнение автора: сложность=${s.opinionDifficulty??'—'} · крутость=${s.opinionCoolness??'—'}</p>`;
+      card.onclick=()=>{open(`Заявка уровня: ${s.nick??'Без ника'}`,`<p>${s.text??''}</p><p class='small'>Ссылка: ${s.link??'—'} · файл: ${s.fileUrl??'—'}</p><p class='small'>Мнение автора: сложность=${s.opinionDifficulty??'—'} · крутость=${s.opinionCoolness??'—'} · комментарий=${s.opinionNote??'—'}</p><input id='note' placeholder='Комментарий'><input id='rank' type='number' min='1' placeholder='Место'><div class='top-actions'><button id='ok'>Одобрить</button><button id='no' class='btn-danger'>Отклонить</button></div>`);document.getElementById('ok').onclick=async()=>{const rank=Number(document.getElementById('rank').value);if(!rank)return alert('Укажи место');await addDoc(collection(db,'levels'),{link:s.link??'',text:s.text??'',fileUrl:s.fileUrl??'',builder:s.builder??'—',verifier:s.verifier??'—',rank,status:'active',addedBy:meRef.uid,addedByNick:meRef.nick,createdAt:serverTimestamp(),sourceSubmissionId:s.id,suggestedDifficulty:s.opinionDifficulty??'',suggestedCoolness:s.opinionCoolness??''});await updateDoc(doc(db,'level_submissions',s.id),{status:'approved',note:document.getElementById('note').value.trim(),reviewedBy:meRef.uid,reviewedAt:serverTimestamp(),finalRank:rank});modal.classList.remove('open');await loadLevels();await renderLevelSubs();};document.getElementById('no').onclick=async()=>{await updateDoc(doc(db,'level_submissions',s.id),{status:'rejected',note:document.getElementById('note').value.trim()||'Отклонено',reviewedBy:meRef.uid,reviewedAt:serverTimestamp()});modal.classList.remove('open');await renderLevelSubs();};};
+      rows.appendChild(card);
+    });
+  };
+  ['levelSearch','levelDifficultyFilter','levelCoolnessFilter'].forEach(id=>document.getElementById(id).oninput=render);
+  document.getElementById('levelDifficultyFilter').onchange=render;document.getElementById('levelCoolnessFilter').onchange=render;
+  render();
+}
+
+async function renderCompSubs(){
+  const box=document.getElementById('compPanel');
+  box.innerHTML=`<div class='card'><label>Поиск</label><input id='compSearch' placeholder='Ник, текст, ссылка'><label>Фильтр по уровню</label><select id='compLevelFilter'><option value='all'>Все уровни</option>${levels.map(l=>`<option value='${l.id}'>#${l.rank} · ${String(l.text??'').slice(0,40)}</option>`).join('')}</select></div><div id='compRows'>Загрузка...</div>`;
+  const rows=document.getElementById('compRows');
+  const snap=await getDocs(query(collection(db,'completion_submissions'),where('status','==','pending')));
+  const items=[]; snap.forEach(d=>items.push({id:d.id,...d.data()}));
+  const size=Math.max(2,levels.length);
+  const render=()=>{
+    const q=(document.getElementById('compSearch').value||'').trim().toLowerCase();
+    const lvl=document.getElementById('compLevelFilter').value;
+    const filtered=items.filter(s=>{
+      const hay=`${s.nick??''} ${s.text??''} ${s.link??''}`.toLowerCase();
+      if(q && !hay.includes(q)) return false;
+      if(lvl!=='all' && s.levelId!==lvl) return false;
+      return true;
+    });
+    if(!filtered.length){ rows.innerHTML='<p>Нет заявок.</p>'; return; }
+    rows.innerHTML='';
+    filtered.forEach(s=>{
+      const card=document.createElement('div');card.className='list-item clickable';card.innerHTML=`<b>${s.nick??'Без ника'}</b><p class='small'>${s.text??''}</p>`;card.onclick=()=>{const opts=levels.map(l=>`<option value='${l.id}' ${l.id===s.levelId?'selected':''}>#${l.rank} · ${String(l.text??'').slice(0,60)}</option>`).join('');open(`Заявка прохождения: ${s.nick??'Без ника'}`,`<select id='lvl'><option value=''>Выбери уровень</option>${opts}</select><p id='prev' class='small'>Очки: —</p><input id='note' placeholder='Комментарий'><div class='top-actions'><button id='ok'>Подтвердить</button><button id='no' class='btn-danger'>Отклонить</button></div>`);document.getElementById('lvl').onchange=async()=>{const l=levels.find(x=>x.id===document.getElementById('lvl').value);if(!l){document.getElementById('prev').textContent='Очки: —';return;}const cs=await getDocs(query(collection(db,'completion_submissions'),where('playerId','==',s.playerId)));let c=0;cs.forEach(x=>{if(x.data().status==='approved')c++;});const ranks=[];cs.forEach(x=>{const d=x.data();if(d.status==='approved') ranks.push(Number(d.listRank??1));});document.getElementById('prev').textContent=`Очки: ${calc(l.rank,size,ranks)}`;};document.getElementById('ok').onclick=async()=>{const l=levels.find(x=>x.id===document.getElementById('lvl').value);if(!l)return alert('Выбери уровень');const userRef=doc(db,'users',s.playerId);const us=await getDoc(userRef);const u=us.exists()?us.data():null;if(!u)return alert('Игрок не найден');const cs=await getDocs(query(collection(db,'completion_submissions'),where('playerId','==',s.playerId)));const ranks=[];cs.forEach(x=>{const d=x.data();if(d.status==='approved') ranks.push(Number(d.listRank??1));});const earned=calc(l.rank,size,ranks);await updateDoc(userRef,{points:Number(u.points??0)+earned});await updateDoc(doc(db,'completion_submissions',s.id),{status:'approved',note:document.getElementById('note').value.trim(),reviewedBy:meRef.uid,reviewedAt:serverTimestamp(),awardedPoints:earned,listRank:Number(l.rank??1),listQuantity:size,scoreK:ranks.length+1,levelId:l.id});modal.classList.remove('open');await renderCompSubs();};document.getElementById('no').onclick=async()=>{await updateDoc(doc(db,'completion_submissions',s.id),{status:'rejected',note:document.getElementById('note').value.trim()||'Отклонено',reviewedBy:meRef.uid,reviewedAt:serverTimestamp()});modal.classList.remove('open');await renderCompSubs();};};rows.appendChild(card);});
+  };
+  document.getElementById('compSearch').oninput=render;document.getElementById('compLevelFilter').onchange=render;
+  render();
+}
+
 onAuthStateChanged(auth, async u=>{if(!u)return location.href='index.html';try{const me=await getDoc(doc(db,'users',u.uid));const m=me.exists()?me.data():null;if(!m||m.situation!=='verified') return location.href='nick.html';if(m.role!=='moderator'&&m.role!=='elder') return location.href='main.html';meRef={uid:u.uid,nick:m.nick??'moderator'};await loadCfg();await loadLevels();await renderLevelSubs();await renderCompSubs();status.textContent='';}catch(e){status.textContent=getNetworkErrorMessage(e);}});
 </script></body></html>
