@@ -176,7 +176,7 @@ const dateSort = document.getElementById('dateSort');
 
 let me = null;
 let showPlayers = true;
-let scoring = { maximumPoints:100, rankDecayFactor:3, repeatPenaltyPower:0.5 };
+let scoring = { alphaA:4 };
 let players = [];
 let levels = [];
 let submissions = [];
@@ -227,11 +227,22 @@ function askDanger(text, title='Подтверждение'){
   });
 }
 
-function calcPoints(rank, size, k=1){
+function term(rank, size){
   const n = Math.max(2, Number(size || 2));
   const r = Math.max(1, Math.min(Number(rank || 1), n));
   const x = (r - 1) / (n - 1);
-  return Math.round((scoring.maximumPoints * Math.exp(-scoring.rankDecayFactor * x) / Math.pow(Math.max(1, k), scoring.repeatPenaltyPower))*100)/100;
+  return Math.exp(-Number(scoring.alphaA ?? 4) * x);
+}
+
+function totalByRanks(ranks, size){
+  const sum = ranks.reduce((acc, rank)=>acc + term(rank, size), 0);
+  return Math.round((190 * (1 - Math.exp(-sum))) * 100) / 100;
+}
+
+function calcPoints(rank, size, existingRanks = []){
+  const before = totalByRanks(existingRanks, size);
+  const after = totalByRanks([...existingRanks, Number(rank || 1)], size);
+  return Math.round((after - before) * 100) / 100;
 }
 
 function fmtDate(ts){
@@ -263,9 +274,7 @@ async function loadScoring(){
   const snap = await getDoc(doc(db,'settings','scoring'));
   const s = snap.exists() ? snap.data() : {};
   scoring = {
-    maximumPoints: Number(s.maximumPoints ?? s.maxPoints ?? 100),
-    rankDecayFactor: Number(s.rankDecayFactor ?? s.decayA ?? 3),
-    repeatPenaltyPower: Number(s.repeatPenaltyPower ?? s.grindPower ?? 0.5)
+    alphaA: Number(s.alphaA ?? 4)
   };
 }
 
@@ -320,11 +329,11 @@ async function recalcAllPoints(){
   for(const uid of allUsers){
     const arr = byUser.get(uid) ?? [];
     arr.sort((a,b)=>(a.reviewedAt?.seconds ?? 0) - (b.reviewedAt?.seconds ?? 0));
-    let sum = 0;
+    const ranks = [];
     for(let i=0;i<arr.length;i++){
       const rank = rankById.get(arr[i].levelId) ?? Number(arr[i].listRank ?? 1);
-      const earned = calcPoints(rank, size, i+1);
-      sum += earned;
+      const earned = calcPoints(rank, size, ranks);
+      ranks.push(rank);
       await updateDoc(doc(db,'completion_submissions',arr[i].id), {
         awardedPoints: earned,
         listRank: rank,
@@ -332,7 +341,7 @@ async function recalcAllPoints(){
         scoreK: i+1
       });
     }
-    const total = Math.round((sum + Number(bonusByUser.get(uid) ?? 0))*100)/100;
+    const total = Math.round((totalByRanks(ranks, size) + Number(bonusByUser.get(uid) ?? 0))*100)/100;
     await updateDoc(doc(db,'users',uid), { points: total });
   }
 }
@@ -400,7 +409,7 @@ function renderMainList(){
       row.innerHTML = `<div>${item.rank}</div><div>${item.nick ?? 'Без ника'}</div><div>${Number(item.points ?? 0)}</div>`;
       row.onclick = ()=> openPlayerModal(item.id);
     } else {
-      row.innerHTML = `<div>${Number(item.rank ?? 0) || '—'}</div><div>${item.text ?? 'Без названия'}</div><div>${calcPoints(Number(item.rank ?? 1), Math.max(2, levels.filter(x=>x.status!=='archived').length), 1)} · ${item.builder ?? '—'} / ${item.verifier ?? '—'}</div>`;
+      row.innerHTML = `<div>${Number(item.rank ?? 0) || '—'}</div><div>${item.text ?? 'Без названия'}</div><div>${calcPoints(Number(item.rank ?? 1), Math.max(2, levels.filter(x=>x.status!=='archived').length), [])} · ${item.builder ?? '—'} / ${item.verifier ?? '—'}</div>`;
       row.onclick = ()=> openLevelModal(item.id);
     }
     listContainer.appendChild(row);
@@ -787,7 +796,7 @@ onAuthStateChanged(auth, async user=>{
 document.getElementById('backMain').onclick = ()=> location.href='main.html';
 document.getElementById('toggleList').onclick = ()=>{ showPlayers = !showPlayers; renderMainList(); };
 document.getElementById('openArchive').onclick = ()=> location.href='archive.html';
-document.getElementById('openScoring').onclick = ()=> location.href='elder-levels.html';
+document.getElementById('openScoring').onclick = ()=> location.href='elder-levels.html#settings';
 document.getElementById('mainSearch').oninput = ()=> renderMainList();
 
 document.getElementById('openSubmissions').onclick = ()=>{ selectedSubmissionId = ''; renderSubmissionList(); submissionsModal.classList.add('open'); };
