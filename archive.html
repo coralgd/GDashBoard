@@ -5,35 +5,32 @@
 <title>SpinList — Архив</title>
 <link rel="stylesheet" href="hud.css">
 <style>
-  .folder{cursor:pointer}
-  .path{margin:8px 0}
-  .tag{font-size:11px;opacity:.8;padding:2px 6px;border:1px solid rgba(0,180,255,.35);border-radius:999px;margin-left:8px}
-  .hidden{display:none!important}
+  .toolbar{display:grid;grid-template-columns:minmax(220px,1fr) 180px;gap:10px;margin-bottom:10px}
+  .pill{font-size:11px;opacity:.9;padding:2px 8px;border:1px solid rgba(0,180,255,.35);border-radius:999px}
+  @media (max-width: 760px){.toolbar{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
-<div class="brand-hero">
-  <img src="spinlist-logo.svg" alt="SpinList logo">
-  <div class="brand-title">SPINLIST</div>
-</div>
+<div class="brand-hero"><img src="spinlist-logo.svg" alt="SpinList logo"><div class="brand-title">SPINLIST</div></div>
 <div class="hud" style="max-width:1200px;margin:40px auto;">
   <div class="page-header"><h1>Архив</h1><button id="back" class="btn-ghost">На главную</button></div>
-  <div class="top-actions">
-    <button id="openModeratorLog" class="btn-ghost hidden">Журнал действий модеров</button>
-  </div>
+  <div class="top-actions"><button id="openModeratorLog" class="btn-ghost">Журнал действий модеров</button></div>
   <p id="status" style="color:#00ffff;">Загрузка...</p>
+
+  <div class="toolbar card">
+    <div>
+      <label>Поиск</label>
+      <input id="search" placeholder="Игрок, уровень, текст, статус">
+    </div>
+    <div>
+      <label>Группа</label>
+      <select id="viewType"><option value="byLevel">По уровням</option><option value="byPlayer">По игрокам</option></select>
+    </div>
+  </div>
   <div id="archive"></div>
 </div>
 
-<div id="moderatorLogModal" class="dialog-backdrop">
-  <div class="dialog" style="width:min(980px,96vw);max-height:92vh;overflow:auto;">
-    <div class="page-header">
-      <h2 style="margin:0;">Журнал действий модеров</h2>
-      <button id="closeModeratorLog" class="btn-ghost">Закрыть</button>
-    </div>
-    <div id="moderatorLogList"></div>
-  </div>
-</div>
+<div id="moderatorLogModal" class="dialog-backdrop"><div class="dialog" style="width:min(980px,96vw);max-height:92vh;overflow:auto;"><div class="page-header"><h2 style="margin:0;">Журнал действий модеров</h2><button id="closeModeratorLog" class="btn-ghost">Закрыть</button></div><div id="moderatorLogList"></div></div></div>
 
 <script type="module">
 import { auth, db, getNetworkErrorMessage } from './firebase.js';
@@ -42,314 +39,101 @@ import { collection, getDocs, doc, getDoc, limit, orderBy, query } from "https:/
 
 document.getElementById('back').onclick = ()=> location.href='main.html';
 const statusEl = document.getElementById('status');
-const openModeratorLogBtn = document.getElementById('openModeratorLog');
-const moderatorLogModal = document.getElementById('moderatorLogModal');
-const moderatorLogList = document.getElementById('moderatorLogList');
+const dataState = { rows: [] };
 
-function isElderRole(role){
-  const normalized = String(role ?? '').trim().toLowerCase();
-  return normalized === 'elder' || normalized === 'senior_moderator' || normalized === 'senior-moderator';
-}
+function fmt(ts){ return ts?.seconds ? new Date(ts.seconds * 1000).toLocaleString('ru-RU') : '—'; }
+function norm(v, fallback='—'){ const x=String(v ?? '').trim(); return x || fallback; }
 
-const state = {
-  search: '',
-  levels: new Map(), // level -> Map(player -> types)
-  players: new Map(), // player -> Map(level -> types)
-  modLog: new Map(), // nick -> Map(action -> items)
-  view: 'root',
-  rootType: '', // level|player
-  rootName: '',
-  secondName: '',
-  itemType: ''
-};
+function renderArchive(){
+  const q = document.getElementById('search').value.trim().toLowerCase();
+  const viewType = document.getElementById('viewType').value;
+  const filtered = dataState.rows.filter(r=>{
+    const hay = `${r.levelName} ${r.playerName} ${r.type} ${r.status} ${r.text} ${r.note}`.toLowerCase();
+    return !q || hay.includes(q);
+  });
+  const grouped = new Map();
+  filtered.forEach(r=>{
+    const key = viewType==='byLevel' ? r.levelName : r.playerName;
+    if(!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(r);
+  });
 
-const TYPE_LABELS = {
-  completion: 'заявки на прохождение',
-  appeal: 'апелляции',
-  comments: 'комментарии модера',
-  placement: 'заявки на постановку',
-  awards: 'начисления',
-  messages: 'сообщения'
-};
-
-function ensurePair(levelName, playerName){
-  if(!state.levels.has(levelName)) state.levels.set(levelName, new Map());
-  const byPlayer = state.levels.get(levelName);
-  if(!byPlayer.has(playerName)) byPlayer.set(playerName, { completion:[], appeal:[], comments:[], placement:[], awards:[], messages:[] });
-
-  if(!state.players.has(playerName)) state.players.set(playerName, new Map());
-  const byLevel = state.players.get(playerName);
-  if(!byLevel.has(levelName)) byLevel.set(levelName, { completion:[], appeal:[], comments:[], placement:[], awards:[], messages:[] });
-
-  return { byPlayer: byPlayer.get(playerName), byLevel: byLevel.get(levelName) };
-}
-
-function addToPair(levelName, playerName, type, item){
-  const p = ensurePair(levelName, playerName);
-  p.byPlayer[type].push(item);
-  p.byLevel[type].push(item);
-}
-
-function addCommentIfNeeded(levelName, playerName, item){
-  if(!item.note && !item.reviewedBy && !item.reviewedAt) return;
-  addToPair(levelName, playerName, 'comments', item);
-}
-
-function normalizeName(v, fallback){
-  const x = String(v ?? '').trim();
-  return x || fallback;
-}
-
-function matchName(name, q){
-  const n = name.toLowerCase();
-  return n.startsWith(q) || n.includes(q);
-}
-
-function breadcrumb(){
-  if(state.view==='root') return 'Корень';
-  if(state.view==='modLogUsers') return 'Журнал модеров';
-  if(state.view==='modLogTypes') return `Журнал модеров → ${state.rootName}`;
-  if(state.view==='modLogItems') return `Журнал модеров → ${state.rootName} → ${state.secondName}`;
-  if(state.view==='levelPlayers') return `Уровень: ${state.rootName}`;
-  if(state.view==='playerLevels') return `Игрок: ${state.rootName}`;
-  if(state.view==='pairTypes') return `${state.rootType==='level'?'Уровень':'Игрок'}: ${state.rootName} → ${state.secondName}`;
-  return `${state.rootType==='level'?'Уровень':'Игрок'}: ${state.rootName} → ${state.secondName} → ${TYPE_LABELS[state.itemType]}`;
-}
-
-function pairTypesForCurrent(){
-  if(state.rootType==='level') return state.levels.get(state.rootName)?.get(state.secondName);
-  return state.players.get(state.rootName)?.get(state.secondName);
-}
-
-function render(){
   const box = document.getElementById('archive');
-  const q = state.search.trim().toLowerCase();
-  box.innerHTML = `
-    <div class="path top-actions">
-      <button id="goRoot" class="btn-ghost">Корень</button>
-      <span class="small">${breadcrumb()}</span>
-    </div>
-    <label>Поиск (в корне ищет только папки типа «уровень» и «игрок»)</label>
-    <input id="search" placeholder="Введите имя игрока или название уровня" value="${state.search.replace(/"/g,'&quot;')}" />
-    <div id="content" style="margin-top:10px"></div>
-  `;
+  if(!filtered.length){ box.innerHTML = '<p>Ничего не найдено.</p>'; return; }
 
-  document.getElementById('goRoot').onclick = ()=>{ state.view='root'; state.rootType=''; state.rootName=''; state.secondName=''; state.itemType=''; render(); };
-  document.getElementById('search').oninput = (e)=>{ state.search = e.target.value; render(); };
-
-  const content = document.getElementById('content');
-
-  if(state.view==='root'){
-    if(!q){
-      content.innerHTML = `<div class="row folder" data-type="modlog" data-name="Журнал модеров">📁 <b>Журнал модеров</b></div><p class="small">Введите поиск, чтобы открыть папки «уровень/игрок».</p>`;
-      content.querySelectorAll('.folder').forEach(el=>el.onclick=()=>{
-        if(el.dataset.type==='modlog'){ state.view='modLogUsers'; state.rootType='modlog'; state.rootName=''; state.secondName=''; state.itemType=''; render(); }
-      });
-      return;
-    }
-
-    const levelHits = Array.from(state.levels.keys()).filter(x=>matchName(x,q)).sort((a,b)=>a.localeCompare(b,'ru'));
-    const playerHits = Array.from(state.players.keys()).filter(x=>matchName(x,q)).sort((a,b)=>a.localeCompare(b,'ru'));
-
-    if(!levelHits.length && !playerHits.length){
-      content.innerHTML = '<p>Совпадений нет.</p>';
-      return;
-    }
-
-    let html='';
-    levelHits.forEach(name=> html += `<div class="row folder" data-type="level" data-name="${name}">📁 <b>${name}</b> <span class="tag">уровень</span></div>`);
-    playerHits.forEach(name=> html += `<div class="row folder" data-type="player" data-name="${name}">📁 <b>${name}</b> <span class="tag">игрок</span></div>`);
-    content.innerHTML = `<div class="row folder" data-type="modlog" data-name="Журнал модеров">📁 <b>Журнал модеров</b></div>${html}`;
-
-    content.querySelectorAll('.folder').forEach(el=>el.onclick=()=>{
-      if(el.dataset.type==='modlog'){ state.view='modLogUsers'; state.rootType='modlog'; state.rootName=''; state.secondName=''; state.itemType=''; render(); return; }
-      state.rootType = el.dataset.type;
-      state.rootName = el.dataset.name;
-      state.secondName = '';
-      state.itemType = '';
-      state.view = state.rootType === 'level' ? 'levelPlayers' : 'playerLevels';
-      render();
-    });
-    return;
-  }
-
-  if(state.view==='modLogUsers'){
-    const names = Array.from(state.modLog.keys()).filter(x=>!q||matchName(x,q)).sort((a,b)=>a.localeCompare(b,'ru'));
-    if(!names.length){ content.innerHTML='<p>Журнал модераторов пуст.</p>'; return; }
-    content.innerHTML = names.map(n=>`<div class="row folder" data-name="${n}">📁 <b>${n}</b> <span class="tag">модер</span></div>`).join('');
-    content.querySelectorAll('.folder').forEach(el=>el.onclick=()=>{ state.rootName=el.dataset.name; state.view='modLogTypes'; render(); });
-    return;
-  }
-  if(state.view==='modLogTypes'){
-    const byType = state.modLog.get(state.rootName) ?? new Map();
-    const types = Array.from(byType.keys()).filter(x=>!q||matchName(x,q)).sort((a,b)=>a.localeCompare(b,'ru'));
-    if(!types.length){ content.innerHTML='<p>Типов действий нет.</p>'; return; }
-    content.innerHTML = types.map(t=>`<div class="row folder" data-name="${t}">📁 <b>${t}</b> <span class="small">(${(byType.get(t)??[]).length})</span></div>`).join('');
-    content.querySelectorAll('.folder').forEach(el=>el.onclick=()=>{ state.secondName=el.dataset.name; state.view='modLogItems'; render(); });
-    return;
-  }
-  if(state.view==='modLogItems'){
-    const rows = (state.modLog.get(state.rootName)?.get(state.secondName) ?? [])
-      .filter(x=>!q||JSON.stringify(x).toLowerCase().includes(q))
-      .sort((a,b)=>(b.createdAt?.seconds ?? 0)-(a.createdAt?.seconds ?? 0));
-    if(!rows.length){ content.innerHTML='<p>Записей нет.</p>'; return; }
-    content.innerHTML = rows.map((x,i)=>`<div class="card"><b>#${i+1}</b><p class="small">${formatDate(x.createdAt)}</p><pre class="small" style="white-space:pre-wrap;margin:0;">${JSON.stringify(x.details ?? {}, null, 2)}</pre></div>`).join('');
-    return;
-  }
-
-  if(state.view==='levelPlayers'){
-    const players = Array.from((state.levels.get(state.rootName) ?? new Map()).keys()).filter(x=>!q||matchName(x,q)).sort((a,b)=>a.localeCompare(b,'ru'));
-    if(!players.length){ content.innerHTML='<p>Игроков не найдено.</p>'; return; }
-    content.innerHTML = players.map(p=>`<div class="row folder" data-name="${p}">📁 <b>${p}</b> <span class="tag">игрок</span></div>`).join('');
-    content.querySelectorAll('.folder').forEach(el=>el.onclick=()=>{ state.secondName=el.dataset.name; state.view='pairTypes'; render(); });
-    return;
-  }
-
-  if(state.view==='playerLevels'){
-    const levels = Array.from((state.players.get(state.rootName) ?? new Map()).keys()).filter(x=>!q||matchName(x,q)).sort((a,b)=>a.localeCompare(b,'ru'));
-    if(!levels.length){ content.innerHTML='<p>Уровней не найдено.</p>'; return; }
-    content.innerHTML = levels.map(l=>`<div class="row folder" data-name="${l}">📁 <b>${l}</b> <span class="tag">уровень</span></div>`).join('');
-    content.querySelectorAll('.folder').forEach(el=>el.onclick=()=>{ state.secondName=el.dataset.name; state.view='pairTypes'; render(); });
-    return;
-  }
-
-  if(state.view==='pairTypes'){
-    const types = pairTypesForCurrent();
-    if(!types){ content.innerHTML='<p>Нет данных.</p>'; return; }
-    const keys = Object.keys(TYPE_LABELS).filter(k=>types[k]?.length);
-    if(!keys.length){ content.innerHTML='<p>Папки пусты.</p>'; return; }
-    content.innerHTML = keys.map(k=>`<div class="row folder" data-type="${k}">📁 <b>${TYPE_LABELS[k]}</b> <span class="small">(${types[k].length})</span></div>`).join('');
-    content.querySelectorAll('.folder').forEach(el=>el.onclick=()=>{ state.itemType=el.dataset.type; state.view='items'; render(); });
-    return;
-  }
-
-  const types = pairTypesForCurrent();
-  const items = (types?.[state.itemType] ?? [])
-    .filter(x=>!q || `${x.text ?? ''} ${x.link ?? ''} ${x.note ?? ''} ${x.status ?? ''} ${x.referenceSubmissionId ?? ''}`.toLowerCase().includes(q))
-    .sort((a,b)=>(b.reviewedAt?.seconds ?? 0)-(a.reviewedAt?.seconds ?? 0));
-
-  if(!items.length){ content.innerHTML='<p>Отправки не найдены.</p>'; return; }
-  content.innerHTML = items.map((x,i)=>{
-    const when = x.reviewedAt?.seconds ? new Date(x.reviewedAt.seconds*1000).toLocaleString('ru-RU') : '—';
-    if(state.itemType==='awards'){
-      const created = x.createdAt?.seconds ? new Date(x.createdAt.seconds*1000).toLocaleString('ru-RU') : '—';
-      return `<div class="card"><b>#${i+1} · ${Number(x.amount ?? 0)} очков</b><p>${x.reason ?? 'Без причины'}</p><p class="small">выдал: ${x.grantedByNick ?? '—'} · дата: ${created}</p></div>`;
-    }
-    return `<div class="card"><b>#${i+1} · ${x.status ?? '—'}</b><p>${x.text ?? ''}</p><p class="small">link=${x.link ?? '—'} · file=${x.fileUrl ?? '—'} · ref=${x.referenceSubmissionId ?? '—'}</p><p class="small">note=${x.note ?? '—'} · reviewedBy=${x.reviewedBy ?? '—'} · reviewedAt=${when}</p></div>`;
+  const keys = Array.from(grouped.keys()).sort((a,b)=>a.localeCompare(b,'ru'));
+  const folderCard = `<div class="card"><h3 style="margin-top:0">📁 Журнал действий модеров</h3><p class="small">Отдельная папка с действиями модераторов и старших модераторов.</p><button id="openModeratorLogFolder" class="btn-ghost">Открыть журнал</button></div>`;
+  box.innerHTML = folderCard + keys.map(k=>{
+    const rows = grouped.get(k).sort((a,b)=>(b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
+    return `<div class="card"><h3 style="margin-top:0">${k} <span class="pill">${rows.length}</span></h3>${rows.map((x,i)=>`<div class="list-item"><b>#${i+1} · ${x.type} · ${x.status}</b><p>${x.text || '—'}</p><p class="small">игрок=${x.playerName} · уровень=${x.levelName}</p><p class="small">link=${x.link || '—'} · file=${x.fileUrl || '—'} · note=${x.note || '—'} · дата=${fmt(x.createdAt)}</p></div>`).join('')}</div>`;
   }).join('');
+  const folderBtn = document.getElementById('openModeratorLogFolder');
+  if(folderBtn) folderBtn.onclick = async ()=>{ await loadModeratorLog(); document.getElementById('moderatorLogModal').classList.add('open'); };
 }
 
 async function loadData(){
-  const [levelListSnap, ls, cs, ap, awardsSnap] = await Promise.all([
+  const [levelsSnap, ls, cs, ap] = await Promise.all([
     getDocs(collection(db,'levels')),
+    getDocs(collection(db,'level_submissions')),
+    getDocs(collection(db,'completion_submissions')),
+    getDocs(collection(db,'appeals')),
+  ]);
+  let awardsSnap = null; try { awardsSnap = await getDocs(collection(db,'point_awards')); } catch {}
+  let messagesSnap = null; try { messagesSnap = await getDocs(collection(db,'messages')); } catch {}
+  let moderatorMessagesSnap = null; try { moderatorMessagesSnap = await getDocs(collection(db,'moderator_messages')); } catch {}
+
+  const levelById = new Map(); const levelByRank = new Map();
+  levelsSnap.forEach(d=>{ const l=d.data(); levelById.set(d.id, norm(l.text,`Уровень ${d.id}`)); if(l.rank!=null) levelByRank.set(Number(l.rank), norm(l.text,`Уровень #${l.rank}`)); });
+
+  const rows = [];
+  ls.forEach(d=>{ const x=d.data(); if(!x.status || x.status==='pending') return; rows.push({ type:'placement', status:x.status, text:x.text??'', note:x.note??'', link:x.link??'', fileUrl:x.fileUrl??'', playerName:norm(x.nick,'Без ника'), levelName:x.finalRank!=null?(levelByRank.get(Number(x.finalRank)) ?? `Уровень #${x.finalRank}`):'Без уровня', createdAt:x.createdAt ?? x.reviewedAt ?? null }); });
+  cs.forEach(d=>{ const x=d.data(); if(!x.status || x.status==='pending') return; rows.push({ type:'completion', status:x.status, text:x.text??'', note:x.note??'', link:x.link??'', fileUrl:x.fileUrl??'', playerName:norm(x.nick,'Без ника'), levelName:x.levelId?(levelById.get(x.levelId) ?? `Уровень ${x.levelId}`):(x.listRank!=null?(levelByRank.get(Number(x.listRank)) ?? `Уровень #${x.listRank}`):'Без уровня'), createdAt:x.createdAt ?? x.reviewedAt ?? null }); });
+  ap.forEach(d=>{ const x=d.data(); if(!x.status || x.status==='pending') return; rows.push({ type:'appeal', status:x.status, text:x.text??'', note:x.note??'', link:x.link??'', fileUrl:x.fileUrl??'', playerName:norm(x.nick,'Без ника'), levelName:x.levelId?(levelById.get(x.levelId) ?? `Уровень ${x.levelId}`):(x.listRank!=null?(levelByRank.get(Number(x.listRank)) ?? `Уровень #${x.listRank}`):'Без уровня'), createdAt:x.createdAt ?? x.reviewedAt ?? null }); });
+  if(awardsSnap) awardsSnap.forEach(d=>{ const x=d.data(); rows.push({ type:'award', status:'done', text:`${Number(x.amount ?? 0)} очков`, note:x.reason ?? '', link:'', fileUrl:'', playerName:norm(x.playerNick,'Без ника'), levelName:'Начисления', createdAt:x.createdAt ?? null }); });
+  if(messagesSnap) messagesSnap.forEach(d=>{ const x=d.data(); rows.push({ type:'message', status:x.readAt?'read':'unread', text:x.text ?? '', note:`от ${norm(x.fromNick,'—')} → ${norm(x.toNick,'—')}`, link:'', fileUrl:'', playerName:norm(x.toNick,'Без ника'), levelName:'Сообщения', createdAt:x.createdAt ?? null }); });
+  if(moderatorMessagesSnap) moderatorMessagesSnap.forEach(d=>{ const x=d.data(); rows.push({ type:'message', status:x.readAt?'read':'unread', text:x.text ?? '', note:`[mod] ${norm(x.fromNick,'—')} → ${norm(x.toNick,'—')}`, link:'', fileUrl:'', playerName:norm(x.toNick,'Без ника'), levelName:'Сообщения', createdAt:x.createdAt ?? null }); });
+
+  dataState.rows = rows;
+}
+
+function renderModeratorLogRows(rows){
+  const list = document.getElementById('moderatorLogList');
+  if(!rows.length){ list.innerHTML = '<p>Журнал пока пуст.</p>'; return; }
+  rows.sort((a,b)=>(b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
+  list.innerHTML = rows.slice(0,200).map((x, i)=>`<div class="card"><b>#${i+1} · ${x.action ?? 'action'}</b><p class="small">${fmt(x.createdAt)} · ${x.actorNick ?? '—'} (${x.actorRole ?? 'moderator'})</p><pre class="small" style="white-space:pre-wrap;margin:0;">${JSON.stringify(x.details ?? {}, null, 2)}</pre></div>`).join('');
+}
+
+async function buildModeratorLogFallback(){
+  const [levelSnap, compSnap, appealSnap, awardsSnap] = await Promise.all([
     getDocs(collection(db,'level_submissions')),
     getDocs(collection(db,'completion_submissions')),
     getDocs(collection(db,'appeals')),
     getDocs(collection(db,'point_awards'))
   ]);
-  let awardsSnap = null;
-  try { awardsSnap = await getDocs(collection(db,'point_awards')); } catch {}
-  let messagesSnap = null;
-  try { messagesSnap = await getDocs(collection(db,'messages')); } catch {}
-  let modActionsSnap = null;
-  try { modActionsSnap = await getDocs(collection(db,'moderator_actions')); } catch {}
-
-  const levelNameById = new Map();
-  const levelNameByRank = new Map();
-  levelListSnap.forEach(d=>{
-    const l = d.data();
-    levelNameById.set(d.id, normalizeName(l.text, `Уровень ${d.id}`));
-    if(l.rank!=null) levelNameByRank.set(Number(l.rank), normalizeName(l.text, `Уровень #${l.rank}`));
-  });
-
-  state.levels = new Map();
-  state.players = new Map();
-  state.modLog = new Map();
-
-  ls.forEach(d=>{
-    const x = d.data();
-    if(!x.status || x.status==='pending') return;
-    const levelName = x.finalRank!=null ? (levelNameByRank.get(Number(x.finalRank)) ?? `Уровень #${x.finalRank}`) : 'Без уровня';
-    const player = normalizeName(x.nick, 'Без ника');
-    addToPair(levelName, player, 'placement', x);
-    addCommentIfNeeded(levelName, player, x);
-  });
-
-  cs.forEach(d=>{
-    const x = d.data();
-    if(!x.status || x.status==='pending') return;
-    let levelName = 'Без уровня';
-    if(x.levelId) levelName = levelNameById.get(x.levelId) ?? `Уровень ${x.levelId}`;
-    else if(x.listRank!=null) levelName = levelNameByRank.get(Number(x.listRank)) ?? `Уровень #${x.listRank}`;
-    const player = normalizeName(x.nick, 'Без ника');
-    addToPair(levelName, player, 'completion', x);
-    addCommentIfNeeded(levelName, player, x);
-  });
-
-  ap.forEach(d=>{
-    const x = d.data();
-    if(!x.status || x.status==='pending') return;
-    let levelName = 'Без уровня';
-    if(x.levelId) levelName = levelNameById.get(x.levelId) ?? `Уровень ${x.levelId}`;
-    else if(x.listRank!=null) levelName = levelNameByRank.get(Number(x.listRank)) ?? `Уровень #${x.listRank}`;
-    const player = normalizeName(x.nick, 'Без ника');
-    addToPair(levelName, player, 'appeal', x);
-    addCommentIfNeeded(levelName, player, x);
-  });
-  if(awardsSnap){
-    awardsSnap.forEach(d=>{
-      const x = d.data();
-      const player = normalizeName(x.playerNick, 'Без ника');
-      addToPair('Начисления', player, 'awards', x);
-    });
-  }
-  if(messagesSnap){
-    messagesSnap.forEach(d=>{
-      const x = d.data();
-      const toNick = normalizeName(x.toNick, 'Получатель');
-      const fromNick = normalizeName(x.fromNick, 'Отправитель');
-      addToPair('Сообщения', toNick, 'messages', { ...x, text: `[от ${fromNick}] ${x.text ?? ''}` });
-    });
-  }
-  if(modActionsSnap){
-    modActionsSnap.forEach(d=>{
-      const x = d.data();
-      const nick = normalizeName(x.actorNick, 'Без ника');
-      const type = normalizeName(x.action, 'action');
-      if(!state.modLog.has(nick)) state.modLog.set(nick, new Map());
-      const byType = state.modLog.get(nick);
-      if(!byType.has(type)) byType.set(type, []);
-      byType.get(type).push(x);
-    });
-  }
-}
-
-function formatDate(ts){
-  return ts?.seconds ? new Date(ts.seconds * 1000).toLocaleString('ru-RU') : '—';
+  const rows = [];
+  levelSnap.forEach(d=>{ const x=d.data(); if(!x.reviewedBy || !x.reviewedAt || !x.status || x.status==='pending') return; rows.push({ action:'review_level_submission', actorNick:x.reviewedByNick ?? x.reviewedBy ?? '—', actorRole:'moderator', createdAt:x.reviewedAt, details:{ submissionId:d.id, verdict:x.status, finalRank:x.finalRank ?? null, note:x.note ?? '' } }); });
+  compSnap.forEach(d=>{ const x=d.data(); if(!x.reviewedBy || !x.reviewedAt || !x.status || x.status==='pending') return; rows.push({ action:'review_completion_submission', actorNick:x.reviewedByNick ?? x.reviewedBy ?? '—', actorRole:'moderator', createdAt:x.reviewedAt, details:{ submissionId:d.id, verdict:x.status, levelId:x.levelId ?? null, note:x.note ?? '' } }); });
+  appealSnap.forEach(d=>{ const x=d.data(); if(!x.reviewedBy || !x.reviewedAt || !x.status || x.status==='pending') return; rows.push({ action:'review_appeal', actorNick:x.reviewedByNick ?? x.reviewedBy ?? '—', actorRole:'moderator', createdAt:x.reviewedAt, details:{ appealId:d.id, verdict:x.status, note:x.note ?? '' } }); });
+  awardsSnap.forEach(d=>{ const x=d.data(); if(!x.grantedBy || !x.createdAt) return; rows.push({ action:'manual_points_award', actorNick:x.grantedByNick ?? x.grantedBy ?? '—', actorRole:'moderator', createdAt:x.createdAt, details:{ playerNick:x.playerNick ?? '—', amount:Number(x.amount ?? 0), reason:x.reason ?? '' } }); });
+  return rows;
 }
 
 async function loadModeratorLog(){
-  moderatorLogList.innerHTML = '<p>Загрузка журнала…</p>';
+  const list = document.getElementById('moderatorLogList');
+  list.innerHTML = '<p>Загрузка журнала…</p>';
   try {
     const snap = await getDocs(query(collection(db,'moderator_actions'), orderBy('createdAt','desc'), limit(200)));
-    if(snap.empty){
-      moderatorLogList.innerHTML = '<p>Журнал пока пуст.</p>';
-      return;
-    }
-    let html = '';
-    snap.forEach((d, i)=>{
-      const x = d.data();
-      html += `
-        <div class="card">
-          <b>#${i+1} · ${x.action ?? 'action'}</b>
-          <p class="small">${formatDate(x.createdAt)} · ${x.actorNick ?? '—'} (${x.actorRole ?? 'moderator'})</p>
-          <pre class="small" style="white-space:pre-wrap;margin:0;">${JSON.stringify(x.details ?? {}, null, 2)}</pre>
-        </div>
-      `;
-    });
-    moderatorLogList.innerHTML = html;
+    const rows = [];
+    snap.forEach(d=>rows.push(d.data()));
+    renderModeratorLogRows(rows);
   } catch (e) {
-    moderatorLogList.innerHTML = `<p>${getNetworkErrorMessage(e)}</p>`;
+    try {
+      const rows = await buildModeratorLogFallback();
+      renderModeratorLogRows(rows);
+      list.insertAdjacentHTML('afterbegin', `<p class="small">Основной журнал недоступен (${getNetworkErrorMessage(e)}). Показана восстановленная версия по данным заявок.</p>`);
+    } catch (fallbackError) {
+      list.innerHTML = `<p>${getNetworkErrorMessage(fallbackError)}</p>`;
+    }
   }
 }
 
@@ -359,22 +143,16 @@ onAuthStateChanged(auth, async user=>{
     const meSnap = await getDoc(doc(db,'users',user.uid));
     const me = meSnap.exists() ? meSnap.data() : null;
     if(!me || me.situation!=='verified') return location.href='nick.html';
-    openModeratorLogBtn.classList.remove('hidden');
-    openModeratorLogBtn.style.display = '';
-
     await loadData();
+    renderArchive();
     statusEl.textContent='';
-    render();
-  } catch(e){
-    statusEl.textContent = getNetworkErrorMessage(e);
-  }
+  } catch(e){ statusEl.textContent = getNetworkErrorMessage(e); }
 });
 
-openModeratorLogBtn.onclick = async ()=>{
-  await loadModeratorLog();
-  moderatorLogModal.classList.add('open');
-};
-document.getElementById('closeModeratorLog').onclick = ()=> moderatorLogModal.classList.remove('open');
+document.getElementById('search').oninput = renderArchive;
+document.getElementById('viewType').onchange = renderArchive;
+document.getElementById('openModeratorLog').onclick = async ()=>{ await loadModeratorLog(); document.getElementById('moderatorLogModal').classList.add('open'); };
+document.getElementById('closeModeratorLog').onclick = ()=> document.getElementById('moderatorLogModal').classList.remove('open');
 </script>
 </body>
 </html>
