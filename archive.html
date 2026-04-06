@@ -207,11 +207,12 @@ function render(){
 }
 
 async function loadData(){
-  const [levelListSnap, ls, cs, ap] = await Promise.all([
+  const [levelListSnap, ls, cs, ap, awardsSnap] = await Promise.all([
     getDocs(collection(db,'levels')),
     getDocs(collection(db,'level_submissions')),
     getDocs(collection(db,'completion_submissions')),
-    getDocs(collection(db,'appeals'))
+    getDocs(collection(db,'appeals')),
+    getDocs(collection(db,'point_awards'))
   ]);
   let awardsSnap = null;
   try { awardsSnap = await getDocs(collection(db,'point_awards')); } catch {}
